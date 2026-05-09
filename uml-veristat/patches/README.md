@@ -231,7 +231,7 @@ types, the distilled base itself is ambiguous and relocation still fails.
 
 This patch deliberately does not relax CO-RE relocation ambiguity. For
 `BPF_CORE_TYPE_ID_TARGET`, the selected BTF ID is the relocated value, so
-different target IDs remain observable and should still fail.
+different target IDs remain observable and are handled separately in `0005b`.
 
 **Files changed:**
 - `tools/lib/bpf/btf_relocate.c` (keep first compatible duplicate base candidate)
@@ -241,6 +241,22 @@ different target IDs remain observable and should still fail.
 **Result:** `bpf_testmod.ko` can register module BTF on UML despite duplicate
 compatible base candidates, unblocking the module-backed selftests that
 previously failed at object-open time with `-3 ESRCH`.
+
+### 0005b — `libbpf: tolerate duplicate target type IDs in CO-RE relocation`
+
+**Problem:** CO-RE `BPF_CORE_TYPE_ID_TARGET` relocations can see multiple
+compatible target candidates in kernel BTF. For example, UML vmlinux BTF can
+contain duplicate compatible `struct sockaddr_un` definitions. Field-offset
+relocations can still verify that all candidates produce the same offset, but
+`TYPE_ID_TARGET` returns a raw BTF ID, so otherwise compatible candidates appear
+as an ambiguity even when either ID would be valid for `bpf_rdonly_cast()`.
+
+**Fix:** In `relo_core.c`, keep the first non-poisoned candidate for
+`BPF_CORE_TYPE_ID_TARGET` and skip later compatible candidates that only differ
+by target type ID. Other relocation kinds keep the existing ambiguity checks.
+
+**Files changed:**
+- `tools/lib/bpf/relo_core.c`
 
 ## Patch 0006 — bpf: preallocate arena range-tree nodes in sleepable paths
 

@@ -88,7 +88,7 @@ You can override the paths to the kernel and veristat binaries using environment
 
 ## Kernel Patches
 
-The `patches/` directory contains 10 patches applied to the `bpf-next` kernel tree to enable full BPF verification on UML:
+The `patches/` directory contains 11 patches applied to the `bpf-next` kernel tree to enable full BPF verification on UML:
 
 | Patch | Description | Programs fixed |
 |-------|-------------|----------------|
@@ -99,6 +99,7 @@ The `patches/` directory contains 10 patches applied to the `bpf-next` kernel tr
 | 0003c | Wire the native x86 BPF JIT backend into UML with runtime shims | real JIT capability hooks + clean verbose diagnostics |
 | 0004 | Fix `bpf_testmod.c` compilation on UML | bpf_testmod module |
 | 0005 | Tolerate duplicate base BTF candidates during split-BTF relocation | btf_relocate |
+| 0005b | Tolerate duplicate target type IDs during CO-RE relocation | `bpf_core_cast()` / `bpf_rdonly_cast()` users |
 | 0006 | Preallocate arena range-tree nodes in sleepable paths | arena map creation + arena globals copied through mmap |
 | 0007 | Fix veristat map fixup for zero key_size/value_size while preserving arena zero fields | bench + cgroup maps, arena maps reach kernel allocation path |
 | 0008 | Cap veristat auto log size to avoid UML OOM | verbose log stability |
@@ -118,6 +119,7 @@ The table below shows the current practical correspondence.
 | 0003c | Real x86 JIT capability hooks in UML, plus the UML runtime shims needed to link and use the backend for verification | Kfunc-using objects that used to fail with `JIT does not support calling kernel function`, such as `test_send_signal_kern.bpf.o`, `xfrm_info.bpf.o`, and parts of `test_tunnel_kern.bpf.o`; also suppresses `text_poke()` WARN noise in verbose-mode diagnostics |
 | 0004 | `bpf_testmod.ko` buildability on UML | Global prerequisite for `bpf_testmod`-backed selftests, including `struct_ops_module*`, `kfunc_call_*`, `iters_testmod*`, `kprobe_multi*`, and related module-BTF tests |
 | 0005 | Duplicate base-BTF candidate handling for split-BTF relocation | `bpf_testmod` module-BTF registration, which unblocks module-backed classes such as `struct_ops_*`, `kfunc_call_*`, `iters_testmod*`, `kprobe_multi*`, and `epilogue_*` |
+| 0005b | Duplicate target-type handling for CO-RE `BPF_CORE_TYPE_ID_TARGET` relocations | `bpf_rdonly_cast()` users such as `getpeername_unix_prog.bpf.o`, `getsockname_unix_prog.bpf.o`, and `sendmsg_unix_prog.bpf.o` when vmlinux BTF contains duplicate compatible `struct sockaddr_un` candidates |
 | 0006 | Sleepable arena range-tree bootstrap and user-fault split preallocation | Arena map creation for `arena_*`, `stream.bpf.o`, and `verifier_arena*` objects that previously failed at the first full-range insertion; arena globals copied through libbpf mmap, including `arena_htab.bpf.o`, `arena_spin_lock.bpf.o`, and `verifier_arena_globals1.bpf.o` |
 | 0007 | `veristat` map fixups for harness-shaped objects while preserving map types that require zero key/value sizes | `bloom_filter_bench.bpf.o`, `bpf_hashmap_lookup.bpf.o`, `htab_mem_bench.bpf.o`; arena maps keep their required zero key/value sizes and reach the kernel arena paths |
 | 0008 | Stable verbose verifier logging under UML memory limits | Diagnostic coverage for failing objects in `-vl2` mode, especially `test_send_signal_kern.bpf.o`, `xfrm_info.bpf.o`, and `test_tunnel_kern.bpf.o` |

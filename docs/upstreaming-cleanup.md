@@ -38,11 +38,14 @@ This is the current cleanup list to work through before shaping the local
    - Validate arena range-tree preallocation outside the UML-only workflow.
 
 6. Investigate tolerated top-level corpus drift.
-   - Current moving `bpf-next/master` can report `-EINVAL` file-processing
-     failures for `getpeername_unix_prog.bpf.o`, `getsockname_unix_prog.bpf.o`,
-     `sendmsg_unix_prog.bpf.o`, and `xfrm_info.bpf.o`.
-   - Decide whether each object needs another UML/veristat fix, harness-aware
-     setup, or permanent classification as non-standalone.
+   - `getpeername_unix_prog.bpf.o`, `getsockname_unix_prog.bpf.o`, and
+     `sendmsg_unix_prog.bpf.o` were traced to duplicate
+     `BPF_CORE_TYPE_ID_TARGET` candidates for `struct sockaddr_un`; keep these
+     covered by the generic libbpf CO-RE duplicate-target patch.
+   - Current moving `bpf-next/master` can still report `-EINVAL`
+     file-processing failure for `xfrm_info.bpf.o`.
+   - Decide whether `xfrm_info.bpf.o` needs another UML/veristat fix,
+     harness-aware setup, or permanent classification as non-standalone.
 
 7. Generate maintainer data per final patch.
    - Run `scripts/get_maintainer.pl` from a fresh `bpf-next` tree for each

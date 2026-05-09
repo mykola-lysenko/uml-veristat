@@ -32,18 +32,6 @@
       },
       "expected_failed_process": {},
       "allowed_failed_process": {
-        "getpeername_unix_prog.bpf.o": {
-          "errno": -22,
-          "reason": "current bpf-next standalone cgroup/unix-socket object can require harness or backend setup not modeled by uml-veristat"
-        },
-        "getsockname_unix_prog.bpf.o": {
-          "errno": -22,
-          "reason": "current bpf-next standalone cgroup/unix-socket object can require harness or backend setup not modeled by uml-veristat"
-        },
-        "sendmsg_unix_prog.bpf.o": {
-          "errno": -22,
-          "reason": "current bpf-next standalone cgroup/unix-socket object can require harness or backend setup not modeled by uml-veristat"
-        },
         "xfrm_info.bpf.o": {
           "errno": -22,
           "reason": "current bpf-next object can require backend support or setup beyond the current UML verification stack"
