@@ -1,22 +1,41 @@
-From 5ed2457ba0a93594f7bedd143be405e58d098f62 Mon Sep 17 00:00:00 2001
+From 7d105322a3490e26c42f9b9e812289b732add091 Mon Sep 17 00:00:00 2001
 From: Mykola Lysenko <mykolal@meta.com>
 Date: Fri, 24 Apr 2026 11:07:56 -0700
-Subject: [PATCH] bpf: add verification stubs for UML kernels without
- PERF_EVENTS
+Subject: [PATCH] bpf: add UML verification stubs for kernels without perf
+ events
 
+UML cannot enable PERF_EVENTS, KPROBE_EVENTS, UPROBE_EVENTS, or the
+normal BPF_LSM stack. That leaves tracing, stack trace maps, LSM, and
+selected kfunc-backed selftest objects unregistered, so veristat reports
+file-level failures before it can exercise the verifier.
+
+Add hidden UML-only verification stubs for kernels without perf events.
+The primary BPF_VERIFICATION_STUBS option registers minimal
+verifier_ops/prog_ops for tracing program types and provides callchain
+stubs so BPF_MAP_TYPE_STACK_TRACE can be created for load-time analysis.
+
+Keep the LSM-facing surface behind a separate hidden
+BPF_LSM_VERIFICATION_STUBS option that also requires CONFIG_SECURITY.
+That way BPF_PROG_TYPE_LSM and BPF_MAP_TYPE_INODE_STORAGE are only
+advertised when the matching stub symbols are compiled.
+
+The stubs are for static analysis only: programs are accepted far enough
+for BPF_PROG_LOAD verification, but are never attached or executed.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
 ---
  include/linux/bpf_lsm.h             |   6 +-
  include/linux/bpf_types.h           |  10 +-
  include/linux/perf_event.h          |  17 +-
- kernel/bpf/Kconfig                  |  18 ++
- kernel/bpf/Makefile                 |   7 +-
- kernel/bpf/bpf_verification_stubs.c | 403 ++++++++++++++++++++++++++++
+ kernel/bpf/Kconfig                  |  29 ++
+ kernel/bpf/Makefile                 |   6 +-
+ kernel/bpf/bpf_verification_stubs.c | 446 ++++++++++++++++++++++++++++
  kernel/bpf/stackmap.c               |   2 +
- 7 files changed, 452 insertions(+), 11 deletions(-)
+ 7 files changed, 505 insertions(+), 11 deletions(-)
  create mode 100644 kernel/bpf/bpf_verification_stubs.c
 
 diff --git a/include/linux/bpf_lsm.h b/include/linux/bpf_lsm.h
-index 643809cc7..9c16b8e39 100644
+index 643809cc7..f4689c851 100644
 --- a/include/linux/bpf_lsm.h
 +++ b/include/linux/bpf_lsm.h
 @@ -12,7 +12,7 @@
@@ -24,7 +43,7 @@ index 643809cc7..9c16b8e39 100644
  #include <linux/lsm_hooks.h>
  
 -#ifdef CONFIG_BPF_LSM
-+#if defined(CONFIG_BPF_LSM) || defined(CONFIG_BPF_VERIFICATION_STUBS)
++#if defined(CONFIG_BPF_LSM) || defined(CONFIG_BPF_LSM_VERIFICATION_STUBS)
  
  #define LSM_HOOK(RET, DEFAULT, NAME, ...) \
  	RET bpf_lsm_##NAME(__VA_ARGS__);
@@ -33,7 +52,7 @@ index 643809cc7..9c16b8e39 100644
  bool bpf_lsm_has_d_inode_locked(const struct bpf_prog *prog);
  
 -#else /* !CONFIG_BPF_LSM */
-+#else /* !CONFIG_BPF_LSM && !CONFIG_BPF_VERIFICATION_STUBS */
++#else /* !CONFIG_BPF_LSM && !CONFIG_BPF_LSM_VERIFICATION_STUBS */
  
  static inline bool bpf_lsm_is_sleepable_hook(u32 btf_id)
  {
@@ -42,11 +61,11 @@ index 643809cc7..9c16b8e39 100644
  	return false;
  }
 -#endif /* CONFIG_BPF_LSM */
-+#endif /* CONFIG_BPF_LSM || CONFIG_BPF_VERIFICATION_STUBS */
++#endif /* CONFIG_BPF_LSM || CONFIG_BPF_LSM_VERIFICATION_STUBS */
  
  #endif /* _LINUX_BPF_LSM_H */
 diff --git a/include/linux/bpf_types.h b/include/linux/bpf_types.h
-index b13de31e1..8359b8f99 100644
+index b13de31e1..0554a736d 100644
 --- a/include/linux/bpf_types.h
 +++ b/include/linux/bpf_types.h
 @@ -35,7 +35,7 @@ BPF_PROG_TYPE(BPF_PROG_TYPE_SK_MSG, sk_msg,
@@ -63,7 +82,7 @@ index b13de31e1..8359b8f99 100644
  BPF_PROG_TYPE(BPF_PROG_TYPE_EXT, bpf_extension,
  	      void *, void *)
 -#ifdef CONFIG_BPF_LSM
-+#if defined(CONFIG_BPF_LSM) || defined(CONFIG_BPF_VERIFICATION_STUBS)
++#if defined(CONFIG_BPF_LSM) || defined(CONFIG_BPF_LSM_VERIFICATION_STUBS)
  BPF_PROG_TYPE(BPF_PROG_TYPE_LSM, lsm,
  	       void *, void *)
 -#endif /* CONFIG_BPF_LSM */
@@ -82,12 +101,12 @@ index b13de31e1..8359b8f99 100644
  BPF_MAP_TYPE(BPF_MAP_TYPE_ARRAY_OF_MAPS, array_of_maps_map_ops)
  BPF_MAP_TYPE(BPF_MAP_TYPE_HASH_OF_MAPS, htab_of_maps_map_ops)
 -#ifdef CONFIG_BPF_LSM
-+#if defined(CONFIG_BPF_LSM) || defined(CONFIG_BPF_VERIFICATION_STUBS)
++#if defined(CONFIG_BPF_LSM) || defined(CONFIG_BPF_LSM_VERIFICATION_STUBS)
  BPF_MAP_TYPE(BPF_MAP_TYPE_INODE_STORAGE, inode_storage_map_ops)
  #endif
  BPF_MAP_TYPE(BPF_MAP_TYPE_TASK_STORAGE, task_storage_map_ops)
 diff --git a/include/linux/perf_event.h b/include/linux/perf_event.h
-index 48d851fbd..107886448 100644
+index 48d851fbd..63f22b671 100644
 --- a/include/linux/perf_event.h
 +++ b/include/linux/perf_event.h
 @@ -2021,7 +2021,22 @@ perf_event_period(struct perf_event *event, u64 value)			{ return -EINVAL; }
@@ -103,11 +122,11 @@ index 48d851fbd..107886448 100644
 + * The actual stub implementations live in kernel/bpf/bpf_verification_stubs.c.
 + */
 +extern int sysctl_perf_event_max_stack;
-+extern int get_callchain_buffers(int max_stack);
-+extern void put_callchain_buffers(void);
-+extern struct perf_callchain_entry *get_callchain_entry(int *rctx);
-+extern void put_callchain_entry(int rctx);
-+extern struct perf_callchain_entry *
++int get_callchain_buffers(int max_stack);
++void put_callchain_buffers(void);
++struct perf_callchain_entry *get_callchain_entry(int *rctx);
++void put_callchain_entry(int rctx);
++struct perf_callchain_entry *
 +get_perf_callchain(struct pt_regs *regs, bool kernel, bool user,
 +		   u32 max_stack, bool crosstask, bool add_mark, u64 defer_cookie);
 +#endif /* CONFIG_BPF_VERIFICATION_STUBS */
@@ -115,48 +134,58 @@ index 48d851fbd..107886448 100644
  #endif /* !CONFIG_PERF_EVENTS */
  
 diff --git a/kernel/bpf/Kconfig b/kernel/bpf/Kconfig
-index eb3de3573..c75ce4046 100644
+index eb3de3573..e155f17b3 100644
 --- a/kernel/bpf/Kconfig
 +++ b/kernel/bpf/Kconfig
-@@ -101,4 +101,22 @@ config BPF_LSM
+@@ -101,4 +101,33 @@ config BPF_LSM
  
  	  If you are unsure how to answer this question, answer N.
  
 +config BPF_VERIFICATION_STUBS
-+	bool "BPF program type stubs for verification-only kernels (UML)"
++	bool
++	depends on UML
 +	depends on BPF_SYSCALL
++	depends on BPF_JIT
++	depends on !PERF_EVENTS
 +	depends on !BPF_EVENTS
-+	default y if UML
++	default y
 +	help
-+	  Provides minimal verifier_ops/prog_ops for BPF program types that
-+	  normally require CONFIG_BPF_EVENTS (tracing, kprobe, tracepoint,
-+	  perf_event, raw_tracepoint) so the BPF verifier can accept these
-+	  for static analysis (veristat).  Also provides STACK_TRACE map
-+	  support via callchain buffer stubs.
++	  Provides minimal verifier_ops/prog_ops for BPF program types
++	  that normally require CONFIG_BPF_EVENTS, so the BPF verifier can
++	  accept these types for static analysis on UML kernels without perf
++	  events. Also provides BPF_MAP_TYPE_STACK_TRACE support via
++	  callchain buffer stubs.
 +
-+	  When CONFIG_SECURITY is also enabled, additionally provides
-+	  BPF_PROG_TYPE_LSM stubs, BPF_MAP_TYPE_INODE_STORAGE, and
-+	  FS kfuncs (bpf_get_file_xattr, etc.).
++	  This is only intended for UML verification-only environments.
++	  Programs are accepted for load-time analysis, but are never
++	  attached or executed.
 +
-+	  Programs are never attached or executed.
++config BPF_LSM_VERIFICATION_STUBS
++	bool
++	depends on BPF_VERIFICATION_STUBS
++	depends on SECURITY
++	default y
++	help
++	  Provides BPF_PROG_TYPE_LSM, BPF_MAP_TYPE_INODE_STORAGE, BPF LSM
++	  attach targets, and selected LSM kfunc BTF entries for UML
++	  verification-only kernels.
 +
  endmenu # "BPF subsystem"
 diff --git a/kernel/bpf/Makefile b/kernel/bpf/Makefile
-index 399007b67..26438fc45 100644
+index 399007b67..43a074dc9 100644
 --- a/kernel/bpf/Makefile
 +++ b/kernel/bpf/Makefile
-@@ -12,7 +12,9 @@ obj-$(CONFIG_BPF_SYSCALL) += hashtab.o arraymap.o percpu_freelist.o bpf_lru_list
+@@ -12,7 +12,8 @@ obj-$(CONFIG_BPF_SYSCALL) += hashtab.o arraymap.o percpu_freelist.o bpf_lru_list
  obj-$(CONFIG_BPF_SYSCALL) += local_storage.o queue_stack_maps.o ringbuf.o bpf_insn_array.o
  obj-$(CONFIG_BPF_SYSCALL) += bpf_local_storage.o bpf_task_storage.o
  obj-$(CONFIG_BPF_SYSCALL) += fixups.o cfg.o states.o backtrack.o check_btf.o
 -obj-${CONFIG_BPF_LSM}	  += bpf_inode_storage.o
-+ifneq ($(filter y,$(CONFIG_BPF_LSM) $(CONFIG_BPF_VERIFICATION_STUBS)),)
-+obj-$(CONFIG_BPF_SYSCALL) += bpf_inode_storage.o
-+endif
++obj-$(CONFIG_BPF_LSM) += bpf_inode_storage.o
++obj-$(CONFIG_BPF_LSM_VERIFICATION_STUBS) += bpf_inode_storage.o
  obj-$(CONFIG_BPF_SYSCALL) += disasm.o mprog.o
  obj-$(CONFIG_BPF_JIT) += trampoline.o
  obj-$(CONFIG_BPF_SYSCALL) += btf.o memalloc.o rqspinlock.o stream.o
-@@ -27,7 +29,7 @@ obj-$(CONFIG_BPF_SYSCALL) += offload.o
+@@ -27,7 +28,7 @@ obj-$(CONFIG_BPF_SYSCALL) += offload.o
  obj-$(CONFIG_BPF_SYSCALL) += net_namespace.o
  obj-$(CONFIG_BPF_SYSCALL) += tcx.o
  endif
@@ -165,7 +194,7 @@ index 399007b67..26438fc45 100644
  obj-$(CONFIG_BPF_SYSCALL) += stackmap.o
  endif
  ifeq ($(CONFIG_CGROUPS),y)
-@@ -68,6 +70,7 @@ ifeq ($(CONFIG_DMA_SHARED_BUFFER),y)
+@@ -68,6 +69,7 @@ ifeq ($(CONFIG_DMA_SHARED_BUFFER),y)
  obj-$(CONFIG_BPF_SYSCALL) += dmabuf_iter.o
  endif
  
@@ -175,25 +204,25 @@ index 399007b67..26438fc45 100644
  CFLAGS_REMOVE_queue_stack_maps.o = $(CC_FLAGS_FTRACE)
 diff --git a/kernel/bpf/bpf_verification_stubs.c b/kernel/bpf/bpf_verification_stubs.c
 new file mode 100644
-index 000000000..589b95659
+index 000000000..cb4ece330
 --- /dev/null
 +++ b/kernel/bpf/bpf_verification_stubs.c
-@@ -0,0 +1,451 @@
+@@ -0,0 +1,446 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * BPF program type stubs for verification-only kernels (e.g. UML)
 + *
 + * Provides minimal verifier_ops/prog_ops for BPF program types that
-+ * normally require CONFIG_BPF_EVENTS or CONFIG_BPF_LSM so the verifier
-+ * can accept BPF_PROG_LOAD for static analysis (veristat).  Programs
-+ * are never attached or executed.
++ * normally require CONFIG_BPF_EVENTS so the verifier can accept
++ * BPF_PROG_LOAD for static analysis (veristat).  Programs are never
++ * attached or executed.
 + *
 + * Tracing stubs: KPROBE, TRACEPOINT, PERF_EVENT, RAW_TRACEPOINT,
 + *   RAW_TRACEPOINT_WRITABLE, TRACING + STACK_TRACE map support.
 + *
-+ * LSM stubs (when CONFIG_SECURITY is set): BPF_PROG_TYPE_LSM,
-+ *   BPF_MAP_TYPE_INODE_STORAGE, bpf_lsm_* BTF attach targets,
-+ *   FS kfuncs (bpf_get_file_xattr, etc.).
++ * LSM stubs (when CONFIG_BPF_LSM_VERIFICATION_STUBS is set):
++ *   BPF_PROG_TYPE_LSM, BPF_MAP_TYPE_INODE_STORAGE, bpf_lsm_* BTF attach
++ *   targets, FS kfuncs (bpf_get_file_xattr, etc.).
 + */
 +
 +#include <linux/bpf.h>
@@ -205,14 +234,6 @@ index 000000000..589b95659
 +
 +/* --- Tracing program type stubs --- */
 +
-+extern const struct bpf_func_proto *
-+bpf_base_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog);
-+
-+extern bool bpf_tracing_btf_ctx_access(int off, int size,
-+	enum bpf_access_type type,
-+	const struct bpf_prog *prog,
-+	struct bpf_insn_access_aux *info);
-+
 +static const struct bpf_func_proto *
 +stub_tracing_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 +{
@@ -220,9 +241,9 @@ index 000000000..589b95659
 +}
 +
 +static bool stub_tracing_is_valid_access(int off, int size,
-+	enum bpf_access_type type,
-+	const struct bpf_prog *prog,
-+	struct bpf_insn_access_aux *info)
++					 enum bpf_access_type type,
++					 const struct bpf_prog *prog,
++					 struct bpf_insn_access_aux *info)
 +{
 +	return bpf_tracing_btf_ctx_access(off, size, type, prog, info);
 +}
@@ -232,21 +253,16 @@ index 000000000..589b95659
 +	.get_func_proto  = stub_tracing_func_proto,			\
 +	.is_valid_access = stub_tracing_is_valid_access,		\
 +};									\
-+const struct bpf_prog_ops name##_prog_ops = {};
++const struct bpf_prog_ops name##_prog_ops = {}
 +
-+DEFINE_STUB_OPS(tracing)
-+DEFINE_STUB_OPS(kprobe)
-+DEFINE_STUB_OPS(tracepoint)
-+DEFINE_STUB_OPS(perf_event)
-+DEFINE_STUB_OPS(raw_tracepoint)
-+DEFINE_STUB_OPS(raw_tracepoint_writable)
++DEFINE_STUB_OPS(tracing);
++DEFINE_STUB_OPS(kprobe);
++DEFINE_STUB_OPS(tracepoint);
++DEFINE_STUB_OPS(perf_event);
++DEFINE_STUB_OPS(raw_tracepoint);
++DEFINE_STUB_OPS(raw_tracepoint_writable);
 +
 +/* --- Tracing kfunc stubs --- */
-+
-+struct task_struct;
-+
-+extern struct task_struct *bpf_task_from_pid(s32 pid);
-+extern void bpf_task_release(struct task_struct *task);
 +
 +__bpf_kfunc_start_defs();
 +
@@ -319,27 +335,32 @@ index 000000000..589b95659
 +	return NULL;
 +}
 +
-+/* --- LSM program type stubs (require CONFIG_SECURITY) --- */
++/* --- LSM program type stubs --- */
 +
-+#ifdef CONFIG_SECURITY
++#ifdef CONFIG_BPF_LSM_VERIFICATION_STUBS
 +
 +#include <linux/bpf_lsm.h>
 +#include <linux/btf_ids.h>
 +#include <linux/fs.h>
 +
 +/* Weak nop bpf_lsm_* functions — BTF attach targets for SEC("lsm/...") */
-+#define LSM_HOOK(RET, DEFAULT, NAME, ...)	\
-+__weak noinline RET bpf_lsm_##NAME(__VA_ARGS__)	\
-+{						\
-+	return DEFAULT;				\
++#define __BPF_LSM_DEFINE_HOOK(type, DEFAULT, NAME, ...)		\
++struct bpf_lsm_##NAME##_stub;					\
++__weak noinline type bpf_lsm_##NAME(__VA_ARGS__)		\
++{								\
++	return DEFAULT;						\
 +}
++
++#define LSM_HOOK(type, ...) __BPF_LSM_DEFINE_HOOK(type, __VA_ARGS__)
 +
 +#include <linux/lsm_hook_defs.h>
 +#undef LSM_HOOK
 +
 +/* BTF ID sets for hook validation */
 +
-+#define LSM_HOOK(RET, DEFAULT, NAME, ...) BTF_ID(func, bpf_lsm_##NAME)
++#define __BPF_LSM_HOOK_ID(name) BTF_ID(func, bpf_lsm_##name)
++#define __BPF_LSM_HOOK_NAME(type, name, ...) name
++#define LSM_HOOK(type, ...) __BPF_LSM_HOOK_ID(__BPF_LSM_HOOK_NAME(__VA_ARGS__))
 +BTF_SET_START(bpf_lsm_hooks)
 +#include <linux/lsm_hook_defs.h>
 +#undef LSM_HOOK
@@ -575,20 +596,23 @@ index 000000000..589b95659
 +	return -EOPNOTSUPP;
 +}
 +
-+__bpf_kfunc int bpf_get_dentry_xattr(struct dentry *dentry, const char *name__str,
-+				      struct bpf_dynptr *value_p)
++__bpf_kfunc int bpf_get_dentry_xattr(struct dentry *dentry,
++				     const char *name__str,
++				     struct bpf_dynptr *value_p)
 +{
 +	return -EOPNOTSUPP;
 +}
 +
-+__bpf_kfunc int bpf_get_file_xattr(struct file *file, const char *name__str,
-+				    struct bpf_dynptr *value_p)
++__bpf_kfunc int bpf_get_file_xattr(struct file *file,
++				   const char *name__str,
++				   struct bpf_dynptr *value_p)
 +{
 +	return -EOPNOTSUPP;
 +}
 +
-+__bpf_kfunc int bpf_set_dentry_xattr(struct dentry *dentry, const char *name__str,
-+				      const struct bpf_dynptr *value_p, int flags)
++__bpf_kfunc int bpf_set_dentry_xattr(struct dentry *dentry,
++				     const char *name__str,
++				     const struct bpf_dynptr *value_p, int flags)
 +{
 +	return -EOPNOTSUPP;
 +}
@@ -629,7 +653,7 @@ index 000000000..589b95659
 +	.is_valid_access = btf_ctx_access,
 +};
 +
-+#endif /* CONFIG_SECURITY */
++#endif /* CONFIG_BPF_LSM_VERIFICATION_STUBS */
 diff --git a/kernel/bpf/stackmap.c b/kernel/bpf/stackmap.c
 index da3d328f5..ee4e412f0 100644
 --- a/kernel/bpf/stackmap.c
@@ -651,4 +675,5 @@ index da3d328f5..ee4e412f0 100644
  /* Called from eBPF program */
  static void *stack_map_lookup_elem(struct bpf_map *map, void *key)
 -- 
-2.52.0
+2.53.0-Meta
+

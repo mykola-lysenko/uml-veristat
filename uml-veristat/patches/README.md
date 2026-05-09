@@ -30,7 +30,7 @@ are extracted using `UPT_SYSCALL_ARGn()` macros.
 
 ---
 
-### 0002 — `bpf: add BPF_TRACING_STUBS with stack trace support for UML`
+### 0002 — `bpf: add UML verification stubs for kernels without perf events`
 
 **Problem:** `CONFIG_BPF_EVENTS` depends on `PERF_EVENTS` and
 `KPROBE_EVENTS`/`UPROBE_EVENTS`. On UML these hardware-dependent subsystems are
@@ -44,8 +44,15 @@ Similarly, `BPF_MAP_TYPE_STACK_TRACE` is not registered and the
 to fail on programs that use stack trace maps (`pyperf*`, `strobemeta*`,
 `stacktrace_*`).
 
-**Fix:** Add a new Kconfig option `CONFIG_BPF_TRACING_STUBS` (default `y` when
-`UML`) that:
+**Fix:** Add hidden UML-only verification stub configs:
+
+- `CONFIG_BPF_VERIFICATION_STUBS`, available only for UML kernels with
+  `BPF_SYSCALL`, `BPF_JIT`, and no `PERF_EVENTS`/`BPF_EVENTS`
+- `CONFIG_BPF_LSM_VERIFICATION_STUBS`, additionally gated on `CONFIG_SECURITY`
+  so LSM program/map types are only advertised when the matching stub symbols
+  are compiled
+
+Together these configs:
 
 1. Provides minimal `bpf_verifier_ops` and `bpf_prog_ops` for all six tracing
    program types, using a `DEFINE_STUB_OPS()` macro to eliminate boilerplate.
@@ -56,16 +63,21 @@ to fail on programs that use stack trace maps (`pyperf*`, `strobemeta*`,
    `BPF_MAP_TYPE_STACK_TRACE` maps can be created. The execution-time stubs
    use `WARN_ON_ONCE` since veristat never runs programs.
 
-3. Registers `BPF_MAP_TYPE_STACK_TRACE` in `bpf_types.h` under the stubs
-   config, mirroring the existing `CONFIG_PERF_EVENTS` guard.
+3. Registers `BPF_MAP_TYPE_STACK_TRACE` in `bpf_types.h` under
+   `CONFIG_BPF_VERIFICATION_STUBS`, mirroring the existing
+   `CONFIG_PERF_EVENTS` guard.
+
+4. Registers `BPF_PROG_TYPE_LSM`, `BPF_MAP_TYPE_INODE_STORAGE`, BPF LSM attach
+   target symbols, and selected LSM kfunc BTF entries only when
+   `CONFIG_BPF_LSM_VERIFICATION_STUBS` is enabled.
 
 **Files changed:**
-- `kernel/bpf/bpf_tracing_stubs.c` (new — stub ops + callchain stubs)
-- `kernel/bpf/Kconfig` (add `CONFIG_BPF_TRACING_STUBS`)
-- `kernel/bpf/Makefile` (add `bpf_tracing_stubs.o`, compile `stackmap.o`)
+- `kernel/bpf/bpf_verification_stubs.c` (new — stub ops + callchain/LSM stubs)
+- `kernel/bpf/Kconfig` (add hidden verification stub configs)
+- `kernel/bpf/Makefile` (add `bpf_verification_stubs.o`, compile `stackmap.o`)
 - `kernel/bpf/stackmap.c` (guard perf_event-specific functions)
-- `include/linux/bpf_types.h` (add `#elif CONFIG_BPF_TRACING_STUBS` branch,
-  register `STACK_TRACE` map type)
+- `include/linux/bpf_types.h` (register tracing/stack/LSM types under the stub
+  configs)
 - `include/linux/perf_event.h` (declare callchain stub symbols)
 
 **Result:** veristat success rate improves from ~1,200 to 1,597 programs.
@@ -117,17 +129,40 @@ helpers like `bpf_jit_supports_kfunc_call()` keep returning `false`. This makes
 kfunc-using programs fail with `JIT does not support calling kernel function`
 even though JIT is enabled.
 
-`arch/x86/net/bpf_jit_comp.c` also assumes native x86 support headers and ptregs
-layout. UML needs a few small compatibility shims:
+`arch/x86/net/bpf_jit_comp.c` also assumes native x86 support headers, ptregs
+layout, text patching, mitigation, NOP, and per-cpu runtime symbols that UML
+does not provide. For `uml-veristat`, these paths only need to support
+load-time verifier and JIT analysis; generated code is not executed inside the
+UML guest.
+
+UML's `text_poke()` implementation is also a warning stub. Without a UML-local
+copy path, final JIT image installation emits noisy stack traces during
+otherwise successful verbose-mode verification runs.
 
 1. Export native x86 NOP and vsyscall definitions through UML `asm/` wrappers.
 2. Provide the selector constants used by x86 speculation helpers.
 3. Teach the JIT's `pt_regs` fixup table to use UML's `regs.gp[]` layout.
-4. Provide the missing cpufeature mask fallbacks and declare `this_cpu_off`.
+4. Provide the missing cpufeature mask fallbacks.
+5. Provide UML-local verification-only shims for NOP tables, CFI mode,
+   `text_poke_set()`, `smp_text_poke_single()`, `clear_bhb_loop()`, and
+   `this_cpu_off`.
+6. Route UML around native retpoline/BHB machinery that requires native x86
+   thunk symbols.
+7. Use a direct `memcpy()` for final JIT image copies on UML instead of routing
+   through UML's warning-only `text_poke()` stub.
 
 **Fix:** Link `arch/x86/net/` into `arch/x86/Makefile.um` and add the minimal
-UML/x86 compatibility glue needed for `bpf_jit_comp.c` to build under
-`ARCH=um`.
+UML/x86 compatibility glue needed for `bpf_jit_comp.c` to build and link under
+`ARCH=um`. Keeping the wiring and runtime shims together avoids an intermediate
+patch that enables the native backend but leaves the UML kernel unbuildable.
+
+**Result:** The full UML kernel links, and `bpf_jit_supports_kfunc_call()`
+returns true in the final `linux` binary. Kfunc-using objects like
+`test_send_signal_kern.bpf.o` and `xfrm_info.bpf.o` get past the old
+`JIT does not support calling kernel function` failure and now fail later in
+normal verifier/codegen paths. Verbose-mode runs no longer print spurious
+`WARNING: arch/um/kernel/um_arch.c` / `text_poke+...` stack traces for normal
+successful BPF verification.
 
 **Files changed:**
 - `arch/um/include/asm/cpufeature.h`
@@ -136,62 +171,6 @@ UML/x86 compatibility glue needed for `bpf_jit_comp.c` to build under
 - `arch/x86/um/asm/nops.h` (new)
 - `arch/x86/um/asm/segment.h`
 - `arch/x86/um/asm/vsyscall.h` (new)
-
----
-
-### 0003d — `um/x86: add verification-only runtime shims for BPF JIT`
-
-**Problem:** After linking `arch/x86/net/` into UML, the native x86 BPF JIT
-backend builds but the full UML kernel still fails to link. The backend pulls
-in a larger slice of native x86 runtime support that UML does not provide:
-`x86_nops`, `cfi_mode`, `text_poke_set()`, `smp_text_poke_single()`,
-`clear_bhb_loop()`, `this_cpu_off`, and retpoline thunk machinery.
-
-For `uml-veristat`, we do not need full native text-patching or mitigation
-semantics. We only need the JIT to compile programs far enough for load-time
-analysis. The generated code is never executed inside UML.
-
-**Fix:** Add UML-only runtime shims directly in `arch/x86/net/bpf_jit_comp.c`
-and bypass the native mitigation paths that require retpoline thunk arrays:
-
-1. Provide local x86 NOP tables.
-2. Force `cfi_mode = CFI_OFF`.
-3. Stub `text_poke_set()` and `smp_text_poke_single()` with `memset`/`memcpy`.
-4. Provide a zero `this_cpu_off` symbol and empty `clear_bhb_loop()`.
-5. Use the simple indirect-jump path on UML instead of retpoline thunk targets.
-6. Skip BHB barrier emission on UML.
-
-**Result:** The full UML kernel links, and `bpf_jit_supports_kfunc_call()`
-returns true in the final `linux` binary. Kfunc-using objects like
-`test_send_signal_kern.bpf.o` and `xfrm_info.bpf.o` get past the old
-`JIT does not support calling kernel function` failure and now fail later in
-normal verifier/codegen paths.
-
-**Files changed:**
-- `arch/x86/net/bpf_jit_comp.c`
-
----
-
-### 0003e — `um/x86: avoid UML text_poke warnings for final JIT copy`
-
-**Problem:** UML's `text_poke()` implementation in `arch/um/kernel/um_arch.c`
-is a placeholder that unconditionally calls `WARN_ON(1)`, because upstream UML
-assumes it does not participate in normal kernel text patching. After `0003c`
-and `0003d`, the x86 BPF JIT uses `bpf_arch_text_copy()` during final JIT image
-installation, and that path routed through `text_poke_copy()`. As a result,
-`UML_VERBOSE=1 uml-veristat ...` emitted noisy kernel stack traces even for
-successful verifier runs.
-
-**Fix:** On UML, make `bpf_arch_text_copy()` use a direct `memcpy()` instead of
-`text_poke_copy()`. This matches the existing verification-only UML shims in
-the JIT backend and avoids the bogus `text_poke()` warning path.
-
-**Result:** Verbose-mode runs no longer print spurious
-`WARNING: arch/um/kernel/um_arch.c` / `text_poke+...` stack traces for normal
-successful BPF verification.
-
-**Files changed:**
-- `arch/x86/net/bpf_jit_comp.c`
 
 ---
 
@@ -224,52 +203,79 @@ coverage.
 
 ---
 
-### 0005 — `bpf: btf_relocate: keep first match on multiple same-size candidates`
+### 0005 — `libbpf: tolerate duplicate base BTF candidates in relocation`
 
-**Problem:** On UML, glibc headers included by UML driver files (`arch/um/drivers/`)
-produce duplicate BTF types in vmlinux with structurally equivalent but differently-named
-members (e.g. `struct in6_addr` with `in6_u` vs `__in6_u`). When `bpf_testmod.ko` is
-loaded, `btf_relocate()` validates the module BTF against vmlinux BTF and encounters
-these duplicate candidates. The existing code treats multiple candidates as an error
-(`-EINVAL`), which prevents `bpf_testmod.ko`'s BTF from being registered in
+**Problem:** `btf__relocate()` maps distilled base BTF type IDs to the real
+base BTF type IDs. Distilled base BTF intentionally keeps only name and size
+for named composite types, because that is enough to rewrite split BTF
+references back to the target base BTF.
+
+Some base BTFs can still contain duplicate compatible named types. When one
+distilled base type matches more than one compatible base candidate, the current
+code treats the second candidate as fatal and rejects the whole relocation,
+even though the distilled representation cannot observe a difference between
+those candidates.
+
+On UML this shows up while loading `bpf_testmod.ko`: duplicate vmlinux BTF
+candidates prevent `bpf_testmod.ko`'s BTF from being registered in
 `/sys/kernel/btf/bpf_testmod`.
 
 Without `/sys/kernel/btf/bpf_testmod`, libbpf cannot find the module BTF when loading
 any BPF program that references types from `bpf_testmod` (struct_ops, kfuncs, etc.),
 and veristat fails with `-3 ESRCH` at the file level for all such programs.
 
-**Fix:** Change the multiple-candidates error path to a `pr_debug` message and keep the
-first match. Both candidates are structurally equivalent (same size, same layout), so
-either is a valid relocation target. The first match is the one from the canonical kernel
-type, which is the correct choice.
+**Fix:** Keep the first compatible base candidate for a distilled type and
+ignore later compatible duplicates. Preserve the existing ambiguity check in
+the other direction: if one base candidate matches multiple distilled base
+types, the distilled base itself is ambiguous and relocation still fails.
+
+This patch deliberately does not relax CO-RE relocation ambiguity. For
+`BPF_CORE_TYPE_ID_TARGET`, the selected BTF ID is the relocated value, so
+different target IDs remain observable and should still fail.
 
 **Files changed:**
-- `tools/lib/bpf/btf_relocate.c` (change error to debug+continue for multiple candidates)
+- `tools/lib/bpf/btf_relocate.c` (keep first compatible duplicate base candidate)
+- `tools/testing/selftests/bpf/prog_tests/btf_distill.c` (duplicate base-candidate
+  coverage for primitive and struct cases)
 
-**Result:** veristat success rate improves from 1597 to 1669 programs (+72, +4.5%).
-52 files that previously failed with `-3 ESRCH` (module BTF not found) now process
-successfully, including all `struct_ops_*`, `kfunc_call_*`, `iters_testmod*`,
-`kprobe_multi*`, and `epilogue_*` files.
+**Result:** `bpf_testmod.ko` can register module BTF on UML despite duplicate
+compatible base candidates, unblocking the module-backed selftests that
+previously failed at object-open time with `-3 ESRCH`.
 
-## Patch 0006 — libbpf: relo_core: keep first TYPE_ID_TARGET candidate on duplicate types
+## Patch 0006 — bpf: preallocate arena range-tree nodes in sleepable paths
 
-**File:** `tools/lib/bpf/relo_core.c`
+**Files:** `kernel/bpf/arena.c`, `kernel/bpf/range_tree.c`,
+`kernel/bpf/range_tree.h`
 
-**Problem:** On UML, vmlinux BTF contains structurally-equivalent duplicate types
-(e.g. `struct sockaddr_un` appears twice — once from the kernel, once from glibc
-headers included during the build). When libbpf performs a `BPF_CORE_TYPE_ID_TARGET`
-CO-RE relocation, it finds two matching candidates with different BTF type IDs.
-The existing ambiguity check treats this as a fatal error (`-EINVAL`), causing
-`getsockname_unix_prog.bpf.o`, `netif_receive_skb.bpf.o`, and similar programs
-to fail with "relocation decision ambiguity".
+**Problem:** After veristat preserves arena maps' required zero `key_size` and
+`value_size`, arena objects reach kernel map creation but can fail before any
+real arena verifier work happens. Arena maps track free pages in a
+`range_tree`, and runtime range-tree updates use `kmalloc_nolock()` because
+they can run under `arena->spinlock`.
 
-**Fix:** When two candidates both succeed for a `BPF_CORE_TYPE_ID_TARGET`
-relocation but produce different `new_val` (different BTF type IDs), keep the
-first (lower) BTF ID and skip the duplicate. This mirrors the approach in
-`btf_relocate.c` (patch 0005).
+Two sleepable arena paths can also need a new `range_node`:
 
-**Impact:** Fixes `getsockname_unix_prog.bpf.o`, `netif_receive_skb.bpf.o`,
-`htab_mem_bench.bpf.o`, `stream.bpf.o` (4 files, -22 EINVAL).
+1. `arena_map_alloc()` seeds the empty tree with the full free range.
+2. `arena_vm_fault()` can split a free range when libbpf mmap()s the arena and
+   copies initial `__arena` data into the mapping.
+
+On UML, `kmalloc_nolock()` can fail in both places. The first case returns
+`-ENOMEM` from map creation. The second case returns `VM_FAULT_SIGSEGV` while
+copying arena globals through the user VMA.
+
+**Fix:** Add allocation ownership to `range_node` so nodes allocated from
+sleepable paths are freed with `kfree()`. Use `range_tree_init_full()` to seed
+the initial full range with one `GFP_KERNEL_ACCOUNT` node in normal sleepable
+context. Add `range_tree_clear_with_node()` and let `arena_vm_fault()`
+preallocate one split node before retaking `arena->spinlock`.
+
+Existing runtime callers keep using `range_tree_clear()` and
+`range_tree_set()` unchanged, preserving the `kmalloc_nolock()` behavior for
+normal arena mutations.
+
+**Impact:** Arena maps can be created on UML, and arena objects with global
+data at non-edge offsets now process normally, including `arena_htab.bpf.o`,
+`arena_spin_lock.bpf.o`, and `verifier_arena_globals1.bpf.o`.
 
 ---
 
@@ -323,33 +329,22 @@ large-log opt-in behavior.
 
 ---
 
-## Patch 0009 — bpf: add BPF_LSM_STUBS for kernels without BPF_EVENTS
+## Patch 0009 — selftests/bpf: avoid trace_printk in arena spin lock fallback
 
-**Files:** `kernel/bpf/bpf_lsm_stubs.c` (new), `kernel/bpf/Kconfig`,
-`kernel/bpf/Makefile`, `include/linux/bpf_types.h`, `include/linux/bpf_lsm.h`,
-`fs/Makefile`
+**File:** `tools/testing/selftests/bpf/progs/bpf_arena_spin_lock.h`
 
-**Problem:** `CONFIG_BPF_LSM` depends on `BPF_EVENTS` which requires
-`PERF_EVENTS`, making it impossible to enable on UML. Without `BPF_LSM`,
-`BPF_PROG_TYPE_LSM` is not registered so LSM programs (`SEC("lsm/...")`)
-fail to load. `BPF_MAP_TYPE_INODE_STORAGE` is also unavailable, and the
-FS kfuncs (`bpf_get_file_xattr`, `bpf_get_dentry_xattr`) are not compiled.
+**Problem:** `arena_spin_lock.bpf.o` is a TC program. In UML, `uml-veristat`
+runs without CAP_PERFMON, so TC helper lookup does not expose
+`bpf_trace_printk()`. The globally validated arena spin-lock slow path can reach
+the debug-only `bpf_printk()` calls placed after `cond_break_label()` loop
+escape labels, causing the verifier to reject the otherwise valid object.
 
-**Fix:** Add `CONFIG_BPF_LSM_STUBS` (default `y` on UML) that depends on
-`BPF_SYSCALL`, `BPF_JIT`, and `SECURITY` but not `BPF_EVENTS`. The stub
-provides:
-- Weak noinline `bpf_lsm_*` nop functions (BTF attach targets via `LSM_HOOK`)
-- BTF ID sets for hook validation (`bpf_lsm_hooks`, `sleepable_lsm_hooks`, etc.)
-- `bpf_lsm_verify_prog()`, `bpf_lsm_is_sleepable_hook()`, `bpf_lsm_is_trusted()`,
-  `bpf_lsm_get_retval_range()`
-- Minimal `lsm_verifier_ops` using `btf_ctx_access`
+**Fix:** Remove the two debug-only `bpf_printk()` calls and keep the fallback
+return value. The loop escape labels still give the verifier a bounded path,
+but the object no longer depends on a capability-gated helper.
 
-`bpf_inode_storage.c` and `fs/bpf_fs_kfuncs.c` are compiled under either
-`CONFIG_BPF_LSM` or `CONFIG_BPF_LSM_STUBS`.
-
-**Impact:** Fixes `local_storage`, `map_kptr`, `map_ptr_kern`, `test_get_xattr`,
-`test_map_in_map`, `verifier_vfs_reject`, `xfrm_info` (7 files). Total
-failed-to-process files drops from 23 to 18.
+**Impact:** `arena_spin_lock.bpf.o` now verifies successfully under the normal
+unprivileged `uml-veristat` environment.
 
 ---
 

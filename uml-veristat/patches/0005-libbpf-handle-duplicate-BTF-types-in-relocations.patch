@@ -1,46 +1,78 @@
-From a9189a078000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From e3102cb939b5e1a6877646d2d450be8a1b011d6a Mon Sep 17 00:00:00 2001
 From: Mykola Lysenko <mykolal@meta.com>
 Date: Tue, 21 Apr 2026 21:33:59 -0400
-Subject: [PATCH] libbpf: handle duplicate BTF types in CO-RE relocations
+Subject: [PATCH] libbpf: tolerate duplicate base BTF candidates in relocation
 
-On UML, glibc headers included by UML driver files (arch/um/drivers/)
-produce duplicate BTF types in vmlinux.  These are structurally
-equivalent types with the same name and size but different BTF IDs
-(e.g. struct in6_addr with member 'in6_u' vs '__in6_u', or
-struct sockaddr_un appearing twice).
+btf__relocate() builds a map from distilled base BTF type IDs to
+the real base BTF type IDs. Distilled base BTF intentionally keeps only
+name and size for named composite types, because that is enough to
+rewrite split BTF references back to the target base BTF.
 
-This causes two failures:
+Some base BTFs can still contain duplicate compatible named types. When
+one distilled base type matches more than one compatible base candidate,
+the current code treats the second candidate as fatal and rejects the
+whole relocation, even though the distilled representation cannot
+observe a difference between those candidates.
 
-1. btf_relocate: when loading bpf_testmod.ko, btf_relocate() validates
-   the module BTF against vmlinux BTF.  Multiple base types with the
-   same name and size are treated as a fatal error (-EINVAL), preventing
-   bpf_testmod's BTF from being registered in /sys/kernel/btf/.  Without
-   module BTF, veristat fails with -ESRCH for all programs referencing
-   bpf_testmod types.
+Keep the first compatible base candidate for a distilled type and ignore
+later compatible duplicates. Preserve the existing ambiguity check in the
+other direction: if one base candidate matches multiple distilled base
+types, the distilled base itself is ambiguous and relocation still fails.
 
-2. relo_core: when libbpf performs BPF_CORE_TYPE_ID_TARGET relocations,
-   two matching candidates with different BTF type IDs trigger the
-   ambiguity check, returning -EINVAL.
+Do not relax CO-RE relocation ambiguity. For BPF_CORE_TYPE_ID_TARGET the
+selected BTF ID is the relocated value, so different target IDs remain an
+observable ambiguity.
 
-In both cases the duplicates are structurally equivalent — they passed
-the same matching criteria.  The difference in BTF ID or member name is
-an artifact of duplicate type registration, not a real ambiguity.
-
-Fix both by keeping the first (canonical) match and skipping subsequent
-duplicates with a debug message.
+Update the btf_distill selftests to cover duplicate primitive and struct
+base candidates while keeping duplicate distilled-base candidates as an
+error.
 
 Signed-off-by: Mykola Lysenko <mykolal@meta.com>
 ---
- tools/lib/bpf/btf_relocate.c | 24 ++++++++++++------------
- tools/lib/bpf/relo_core.c    | 12 ++++++++++++
- 2 files changed, 24 insertions(+), 12 deletions(-)
+ tools/lib/bpf/btf_relocate.c                  | 39 +++++----
+ .../selftests/bpf/prog_tests/btf_distill.c    | 84 +++++++++++++++++--
+ 2 files changed, 100 insertions(+), 23 deletions(-)
 
 diff --git a/tools/lib/bpf/btf_relocate.c b/tools/lib/bpf/btf_relocate.c
-index 53d1f3541..32b27bb52 100644
+index 53d1f3541..939fa2b4d 100644
 --- a/tools/lib/bpf/btf_relocate.c
 +++ b/tools/lib/bpf/btf_relocate.c
-@@ -341,19 +341,19 @@ static int btf_relocate_map_distilled_base(struct btf_relocate *r)
+@@ -238,6 +238,7 @@ static int btf_relocate_map_distilled_base(struct btf_relocate *r)
+ 	/* Now search base BTF for matching distilled base BTF types. */
+ 	for (id = 1; id < r->nr_base_types; id++) {
+ 		struct btf_name_info *dist_info, base_info = {};
++		__u32 matched_dist_id = 0;
+ 		int dist_kind, base_kind;
+ 
+ 		base_t = btf_type_by_id(r->base_btf, id);
+@@ -262,11 +263,9 @@ static int btf_relocate_map_distilled_base(struct btf_relocate *r)
+ 		case BTF_KIND_STRUCT:
+ 		case BTF_KIND_UNION:
+ 			/* Size only needs to be used for struct/union if there
+-			 * are multiple types in base BTF with the same name.
+-			 * If there are multiple _distilled_ types with the same
+-			 * name (a very unlikely scenario), that doesn't matter
+-			 * unless corresponding _base_ types to match them are
+-			 * missing.
++			 * are multiple types in base BTF with the same name. If
++			 * multiple distilled types match the same base type below,
++			 * relocation remains ambiguous.
+ 			 */
+ 			base_info.needs_size = base_name_cnt[base_t->name_off] > 1;
+ 			base_info.size = base_t->size;
+@@ -339,21 +338,27 @@ static int btf_relocate_map_distilled_base(struct btf_relocate *r)
+ 			default:
+ 				continue;
  			}
++			if (matched_dist_id) {
++				pr_warn("base BTF type '%s' [%u], size %u matches multiple distilled base BTF types (ids [%u, %u])\n",
++					base_info.name, id, base_t->size,
++					matched_dist_id, dist_info->id);
++				err = -EINVAL;
++				goto done;
++			}
++			matched_dist_id = dist_info->id;
++
  			if (r->id_map[dist_info->id] &&
  			    r->id_map[dist_info->id] != BTF_IS_EMBEDDED) {
 -				/* we already have a match; this tells us that
@@ -50,50 +82,134 @@ index 53d1f3541..32b27bb52 100644
 -				 * on name and size.  In this case, we have
 -				 * no way of determining which to relocate
 -				 * to in base BTF, so error out.
-+				/* We already have a match; multiple base types
-+				 * of the same name have the same size.  This
-+				 * can happen on UML where glibc headers are
-+				 * included alongside kernel headers, producing
-+				 * structurally equivalent but differently-named
-+				 * duplicates (e.g. struct in6_addr with member
-+				 * 'in6_u' vs '__in6_u').  Keep the first match
-+				 * and skip subsequent candidates.
++				/* This distilled type is already mapped. The
++				 * compatibility checks above have already
++				 * filtered this duplicate base candidate against
++				 * the same distilled type, so keep the first
++				 * stable base id.
  				 */
 -				pr_warn("distilled base BTF type '%s' [%u], size %u has multiple candidates of the same size (ids [%u, %u]) in base BTF\n",
 -					base_info.name, dist_info->id,
 -					base_t->size, id, r->id_map[dist_info->id]);
 -				err = -EINVAL;
 -				goto done;
-+				pr_debug("distilled base BTF type '%s' [%u], size %u has multiple candidates (ids [%u, %u]); keeping first\n",
++				pr_debug("distilled base BTF type '%s' [%u], size %u has multiple base candidates (ids [%u, %u]); keeping first\n",
 +					 base_info.name, dist_info->id,
 +					 base_t->size, id, r->id_map[dist_info->id]);
 +				continue;
  			}
  			/* map id and name */
  			r->id_map[dist_info->id] = id;
-diff --git a/tools/lib/bpf/relo_core.c b/tools/lib/bpf/relo_core.c
-index 6ae3f2a15..9de6cfec0 100644
---- a/tools/lib/bpf/relo_core.c
-+++ b/tools/lib/bpf/relo_core.c
-@@ -1385,6 +1385,18 @@ int bpf_core_calc_relo_insn(const char *prog_name,
- 			return -EINVAL;
- 		} else if (cand_res.poison != targ_res->poison ||
- 			   cand_res.new_val != targ_res->new_val) {
-+			/* TYPE_ID_TARGET: duplicate types with different BTF IDs
-+			 * are safe to resolve to the first (canonical) match.
-+			 * See btf_relocate.c for the same approach.
-+			 */
-+			if (relo->kind == BPF_CORE_TYPE_ID_TARGET &&
-+			    !cand_res.poison && !targ_res->poison) {
-+				pr_debug("prog '%s': relo #%d: TYPE_ID_TARGET ambiguity: keeping first candidate (id %llu), skipping duplicate (id %llu)\n",
-+					 prog_name, relo_idx,
-+					 (unsigned long long)targ_res->new_val,
-+					 (unsigned long long)cand_res.new_val);
-+				continue;
-+			}
- 			/* all candidates should result in the same relocation
- 			 * decision and value, otherwise it's dangerous to
- 			 * proceed due to ambiguity
+diff --git a/tools/testing/selftests/bpf/prog_tests/btf_distill.c b/tools/testing/selftests/bpf/prog_tests/btf_distill.c
+index fb67ae195..40f2e59ad 100644
+--- a/tools/testing/selftests/bpf/prog_tests/btf_distill.c
++++ b/tools/testing/selftests/bpf/prog_tests/btf_distill.c
+@@ -445,10 +445,10 @@ static void test_distilled_base_multi_err(void)
+ 	btf__free(btf1);
+ }
+ 
+-/* With 2 types of same size in base BTF, relocation should
+- * fail as we have no means to choose between them.
++/* With 2 equivalent types in base BTF, relocation should keep the
++ * first matching base type.
+  */
+-static void test_distilled_base_multi_err2(void)
++static void test_distilled_base_multi_base(void)
+ {
+ 	struct btf *btf1 = NULL, *btf2 = NULL, *btf3 = NULL, *btf4 = NULL, *btf5 = NULL;
+ 
+@@ -485,7 +485,77 @@ static void test_distilled_base_multi_err2(void)
+ 		btf5,
+ 		"[1] INT 'int' size=4 bits_offset=0 nr_bits=32 encoding=SIGNED",
+ 		"[2] INT 'int' size=4 bits_offset=0 nr_bits=32 encoding=SIGNED");
+-	ASSERT_EQ(btf__relocate(btf4, btf5), -EINVAL, "relocate_split");
++	if (!ASSERT_EQ(btf__relocate(btf4, btf5), 0, "relocate_split"))
++		goto cleanup;
++	VALIDATE_RAW_BTF(btf4,
++			 "[1] INT 'int' size=4 bits_offset=0 nr_bits=32 encoding=SIGNED",
++			 "[2] INT 'int' size=4 bits_offset=0 nr_bits=32 encoding=SIGNED",
++			 "[3] PTR '(anon)' type_id=1");
++cleanup:
++	btf__free(btf5);
++	btf__free(btf4);
++	btf__free(btf3);
++	btf__free(btf2);
++	btf__free(btf1);
++}
++
++static void test_distilled_base_multi_base_struct(void)
++{
++	struct btf *btf1 = NULL, *btf2 = NULL, *btf3 = NULL, *btf4 = NULL, *btf5 = NULL;
++
++	btf1 = btf__new_empty();
++	if (!ASSERT_OK_PTR(btf1, "empty_main_btf"))
++		return;
++	btf__add_int(btf1, "int", 4, BTF_INT_SIGNED);	/* [1] int */
++	btf__add_struct(btf1, "s1", 4);			/* [2] struct s1 { */
++	btf__add_field(btf1, "f1", 1, 0, 0);		/*	int f1; */
++							/* } */
++	VALIDATE_RAW_BTF(btf1,
++			 "[1] INT 'int' size=4 bits_offset=0 nr_bits=32 encoding=SIGNED",
++			 "[2] STRUCT 's1' size=4 vlen=1\n"
++			 "\t'f1' type_id=1 bits_offset=0");
++	btf2 = btf__new_empty_split(btf1);
++	if (!ASSERT_OK_PTR(btf2, "empty_split_btf"))
++		goto cleanup;
++	btf__add_ptr(btf2, 2);
++	VALIDATE_RAW_BTF(btf2,
++			 "[1] INT 'int' size=4 bits_offset=0 nr_bits=32 encoding=SIGNED",
++			 "[2] STRUCT 's1' size=4 vlen=1\n"
++			 "\t'f1' type_id=1 bits_offset=0",
++			 "[3] PTR '(anon)' type_id=2");
++	if (!ASSERT_EQ(0, btf__distill_base(btf2, &btf3, &btf4),
++		       "distilled_base") ||
++	    !ASSERT_OK_PTR(btf3, "distilled_base") ||
++	    !ASSERT_OK_PTR(btf4, "distilled_split") ||
++	    !ASSERT_EQ(2, btf__type_cnt(btf3), "distilled_base_type_cnt"))
++		goto cleanup;
++	VALIDATE_RAW_BTF(btf3, "[1] STRUCT 's1' size=4 vlen=0");
++
++	btf5 = btf__new_empty();
++	if (!ASSERT_OK_PTR(btf5, "empty_reloc_btf"))
++		goto cleanup;
++	btf__add_int(btf5, "int", 4, BTF_INT_SIGNED);	/* [1] int */
++	btf__add_struct(btf5, "s1", 4);			/* [2] struct s1 { */
++	btf__add_field(btf5, "f1", 1, 0, 0);		/*	int f1; */
++							/* } */
++	btf__add_struct(btf5, "s1", 4);			/* [3] struct s1 { */
++	btf__add_field(btf5, "f1", 1, 0, 0);		/*	int f1; */
++							/* } */
++	VALIDATE_RAW_BTF(btf5,
++			 "[1] INT 'int' size=4 bits_offset=0 nr_bits=32 encoding=SIGNED",
++			 "[2] STRUCT 's1' size=4 vlen=1\n"
++			 "\t'f1' type_id=1 bits_offset=0",
++			 "[3] STRUCT 's1' size=4 vlen=1\n"
++			 "\t'f1' type_id=1 bits_offset=0");
++	if (!ASSERT_EQ(btf__relocate(btf4, btf5), 0, "relocate_split"))
++		goto cleanup;
++	VALIDATE_RAW_BTF(btf4,
++			 "[1] INT 'int' size=4 bits_offset=0 nr_bits=32 encoding=SIGNED",
++			 "[2] STRUCT 's1' size=4 vlen=1\n"
++			 "\t'f1' type_id=1 bits_offset=0",
++			 "[3] STRUCT 's1' size=4 vlen=1\n"
++			 "\t'f1' type_id=1 bits_offset=0",
++			 "[4] PTR '(anon)' type_id=2");
+ cleanup:
+ 	btf__free(btf5);
+ 	btf__free(btf4);
+@@ -681,8 +751,10 @@ void test_btf_distill(void)
+ 		test_distilled_base_missing_err();
+ 	if (test__start_subtest("distilled_base_multi_err"))
+ 		test_distilled_base_multi_err();
+-	if (test__start_subtest("distilled_base_multi_err2"))
+-		test_distilled_base_multi_err2();
++	if (test__start_subtest("distilled_base_multi_base"))
++		test_distilled_base_multi_base();
++	if (test__start_subtest("distilled_base_multi_base_struct"))
++		test_distilled_base_multi_base_struct();
+ 	if (test__start_subtest("distilled_base_embedded_err"))
+ 		test_distilled_base_embedded_err();
+ 	if (test__start_subtest("distilled_base_vmlinux"))
 -- 
-2.34.1
+2.53.0-Meta
 

@@ -3,6 +3,16 @@ From: Mykola Lysenko <mykolal@meta.com>
 Date: Fri, 24 Apr 2026 11:03:38 -0700
 Subject: [PATCH] selftests/bpf: veristat: cap auto log size to avoid OOM
 
+veristat probes whether the kernel accepts large verifier log buffers and
+uses that result to choose the default verbose log size. On UML this can
+select a buffer close to one GiB, which is larger than the default guest
+memory and can make verbose runs crash before printing verifier output.
+
+Cap the automatic large-log default at 64 MiB. Users can still request a
+larger buffer explicitly with --log-size.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+
 ---
  tools/testing/selftests/bpf/veristat.c | 4 +++-
  1 file changed, 3 insertions(+), 1 deletion(-)
