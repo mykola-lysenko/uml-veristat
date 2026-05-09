@@ -22,6 +22,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check kernel patch style
+        run: bash uml-veristat/scripts/check_patch_stack.sh
+
       - name: Build uml-veristat package
         working-directory: uml-veristat
         env:
