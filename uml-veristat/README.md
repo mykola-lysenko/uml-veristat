@@ -88,7 +88,7 @@ You can override the paths to the kernel and veristat binaries using environment
 
 ## Kernel Patches
 
-The `patches/` directory contains 11 patches applied to the `bpf-next` kernel tree to enable full BPF verification on UML:
+The `patches/` directory contains 12 patches applied to the `bpf-next` kernel tree to enable full BPF verification on UML:
 
 | Patch | Description | Programs fixed |
 |-------|-------------|----------------|
@@ -103,6 +103,7 @@ The `patches/` directory contains 11 patches applied to the `bpf-next` kernel tr
 | 0006 | Preallocate arena range-tree nodes in sleepable paths | arena map creation + arena globals copied through mmap |
 | 0007 | Fix veristat map fixup for zero key_size/value_size while preserving arena zero fields | bench + cgroup maps, arena maps reach kernel allocation path |
 | 0008 | Cap veristat auto log size to avoid UML OOM | verbose log stability |
+| 0009 | Avoid `trace_printk` in arena spin-lock fallback paths | `arena_spin_lock.bpf.o` from TC/veristat contexts |
 
 ### Patch-to-Selftest Correspondence
 
@@ -123,6 +124,7 @@ The table below shows the current practical correspondence.
 | 0006 | Sleepable arena range-tree bootstrap and user-fault split preallocation | Arena map creation for `arena_*`, `stream.bpf.o`, and `verifier_arena*` objects that previously failed at the first full-range insertion; arena globals copied through libbpf mmap, including `arena_htab.bpf.o`, `arena_spin_lock.bpf.o`, and `verifier_arena_globals1.bpf.o` |
 | 0007 | `veristat` map fixups for harness-shaped objects while preserving map types that require zero key/value sizes | `bloom_filter_bench.bpf.o`, `bpf_hashmap_lookup.bpf.o`, `htab_mem_bench.bpf.o`; arena maps keep their required zero key/value sizes and reach the kernel arena paths |
 | 0008 | Stable verbose verifier logging under UML memory limits | Diagnostic coverage for failing objects in `-vl2` mode, especially `test_send_signal_kern.bpf.o`, `xfrm_info.bpf.o`, and `test_tunnel_kern.bpf.o` |
+| 0009 | Program-type-neutral arena spin-lock fallback paths | `arena_spin_lock.bpf.o`, whose slow-path global-function validation otherwise sees `bpf_trace_printk()` from a TC program type and fails before runtime |
 
 For upstreaming work, use the generated comparison report in
 [`docs/patch-impact.md`](/home/mykolal/bpf-uml-selftests/docs/patch-impact.md)

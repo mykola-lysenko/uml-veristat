@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Sun, 10 May 2026 15:27:00 -0700
+Subject: [PATCH] selftests/bpf: avoid trace_printk in arena spin lock
+ fallbacks
+
+arena_spin_lock.bpf.o uses the arena spin-lock helpers from a TC
+program. The helper implementation has bpf_printk() calls after
+cond_break fallback labels that are intended to catch unexpected loop
+termination.
+
+Even though these paths are not expected to run, the verifier still
+validates them when arena_spin_lock_slowpath() is a global function. TC
+programs cannot use bpf_trace_printk(), so the otherwise valid
+arena_spin_lock.bpf.o program is rejected while processing the helper's
+fallback path.
+
+Drop the printk calls and return the last observed lock value from the
+fallback path. The loop remains bounded for the verifier, and the helper
+stays usable from program types that cannot call bpf_trace_printk().
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ .../selftests/bpf/libarena/include/bpf_arena_spin_lock.h      | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/tools/testing/selftests/bpf/libarena/include/bpf_arena_spin_lock.h b/tools/testing/selftests/bpf/libarena/include/bpf_arena_spin_lock.h
+index 16916365cfd9..afeb951d021f 100644
+--- a/tools/testing/selftests/bpf/libarena/include/bpf_arena_spin_lock.h
++++ b/tools/testing/selftests/bpf/libarena/include/bpf_arena_spin_lock.h
+@@ -170,7 +170,6 @@ static __always_inline u32 xchg_tail(arena_spinlock_t __arena *lock, u32 tail)
+ 
+ 	return old;
+ out:
+-	bpf_printk("RUNTIME ERROR: %s unexpected cond_break exit!!!", __func__);
+ 	return old;
+ }
+ 
+@@ -226,7 +225,6 @@ u32 arena_fetch_set_pending_acquire(arena_spinlock_t __arena *lock)
+ 
+ 	return old;
+ out:
+-	bpf_printk("RUNTIME ERROR: %s unexpected cond_break exit!!!", __func__);
+ 	return old;
+ }
+ 
+-- 
+2.34.1

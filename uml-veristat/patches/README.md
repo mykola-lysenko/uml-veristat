@@ -345,6 +345,29 @@ large-log opt-in behavior.
 
 ---
 
+## Patch 0009 — selftests/bpf: avoid trace_printk in arena spin lock fallbacks
+
+**File:** `tools/testing/selftests/bpf/libarena/include/bpf_arena_spin_lock.h`
+
+**Problem:** `arena_spin_lock.bpf.o` is a TC program using the shared arena
+spin-lock helper. The helper has `bpf_printk()` calls after `cond_break`
+fallback labels used to make retry loops verifier-bounded. Those fallback
+paths are not expected to execute, but global-function validation still checks
+them when verifying `arena_spin_lock_slowpath()`.
+
+TC programs cannot call `bpf_trace_printk()`, so the verifier rejects the whole
+object before the actual arena spin-lock path can be accepted.
+
+**Fix:** Drop the diagnostic `bpf_printk()` calls from the fallback labels and
+return the last observed lock value. The loops remain bounded for the verifier,
+and the helper remains usable from program types that do not allow
+`bpf_trace_printk()`.
+
+**Impact:** Restores `arena_spin_lock.bpf.o` as a passing arena selftest under
+`uml-veristat` on current `bpf-next`.
+
+---
+
 ## Verification Notes
 
 `uml-veristat` is validating two things at once:

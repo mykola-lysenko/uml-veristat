@@ -42,10 +42,13 @@ This is the current cleanup list to work through before shaping the local
      `sendmsg_unix_prog.bpf.o` were traced to duplicate
      `BPF_CORE_TYPE_ID_TARGET` candidates for `struct sockaddr_un`; keep these
      covered by the generic libbpf CO-RE duplicate-target patch.
-   - Current moving `bpf-next/master` can still report `-EINVAL`
-     file-processing failure for `xfrm_info.bpf.o`.
-   - Decide whether `xfrm_info.bpf.o` needs another UML/veristat fix,
-     harness-aware setup, or permanent classification as non-standalone.
+   - `xfrm_info.bpf.o` passed on the refreshed `7e033543a` `bpf-next`
+     package, so the earlier `-EINVAL` was a moving-base issue rather than a
+     currently reproducible UML gap.
+   - `arena_spin_lock.bpf.o` regressed on the refreshed base because the arena
+     spin-lock helper moved under `libarena/include/` and still had
+     `bpf_printk()` in `cond_break` fallback paths. Keep this covered by the
+     selftests arena spin-lock fallback patch.
 
 7. Generate maintainer data per final patch.
    - Run `scripts/get_maintainer.pl` from a fresh `bpf-next` tree for each
