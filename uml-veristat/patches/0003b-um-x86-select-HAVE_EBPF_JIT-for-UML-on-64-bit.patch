@@ -11,8 +11,8 @@ programs (tcp congestion control, etc.) fail to load.
 
 Also select ARCH_WANT_DEFAULT_BPF_JIT on 64-bit UML, matching native
 x86-64, so the guest boots with net.core.bpf_jit_enable=1 by default.
-This avoids having to flip the sysctl in userspace before veristat can
-request JIT.
+This avoids requiring userspace to flip the sysctl before loading
+programs that require JIT support.
 
 Signed-off-by: Mykola Lysenko <mykolal@meta.com>
 ---

@@ -15,10 +15,10 @@ headers, selector constants, and UML-local verification-only shims for
 text patching, NOP, CFI, BHB, and per-cpu symbols that the native
 backend references.
 
-For uml-veristat these runtime paths only need to support load-time
-verifier and JIT analysis; generated code is not executed inside the UML
-guest. Use direct memcpy-based text copies on UML to avoid routing final
-JIT image installation through UML's warning-only text_poke() stub.
+The UML compatibility shims are limited to load-time verifier and JIT
+analysis; they do not provide runtime text patching semantics. Use direct
+memcpy-based text copies on UML to avoid routing final JIT image
+installation through UML's warning-only text_poke() stub.
 
 This lets the native x86 BPF JIT backend provide the strong capability
 symbols used by kfunc and arena verification without leaving an

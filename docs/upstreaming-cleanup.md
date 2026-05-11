@@ -3,12 +3,12 @@
 This is the current cleanup list to work through before shaping the local
 `uml-veristat` patch stack for upstream submission.
 
-1. Normalize patch metadata.
-   - Remove stale hand-written series markers such as `[PATCH 1/6]` and
-     `[PATCH 4/6]`.
-   - Let `git format-patch` assign the final series numbering.
-   - Make every commit message read as an upstream kernel commit, not as local
-     `uml-veristat` infrastructure.
+1. Normalize patch metadata. (done)
+   - Stale hand-written series markers such as `[PATCH 1/6]` and
+     `[PATCH 4/6]` have been removed.
+   - Final upstream numbering should come from `git format-patch`.
+   - Commit messages have been tightened to read as upstream kernel commits,
+     with local `uml-veristat` framing removed from patch metadata.
 
 2. Split upstream submissions by review surface.
    - UML-only fixes: syscall wrappers, stub alignment, JIT Kconfig, and the

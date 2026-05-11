@@ -9,10 +9,10 @@ sleepable arena paths can also need a new range_node.
 
 arena_map_alloc() seeds the empty tree with the full free range, and
 arena_vm_fault() can split a free range when userspace faults an arena
-page through mmap(). On UML, kmalloc_nolock() can fail in both places
-before verification reaches meaningful arena coverage: map creation
-returns -ENOMEM, or libbpf's mmap copy of arena globals receives
-SIGSEGV.
+page through mmap(). Those callers are allowed to sleep, but they still
+depend on the non-sleepable range-tree allocation path. If
+kmalloc_nolock() cannot allocate a node, map creation fails with
+-ENOMEM, or a userspace mmap fault can fail while copying arena globals.
 
 Add range_node allocation ownership so nodes allocated from sleepable
 paths are freed with kfree(), seed the initial full range with

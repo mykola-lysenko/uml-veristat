@@ -6,8 +6,8 @@ Subject: [PATCH] bpf: add UML verification stubs for kernels without perf
 
 UML cannot enable PERF_EVENTS, KPROBE_EVENTS, UPROBE_EVENTS, or the
 normal BPF_LSM stack. That leaves tracing, stack trace maps, LSM, and
-selected kfunc-backed selftest objects unregistered, so veristat reports
-file-level failures before it can exercise the verifier.
+selected kfunc-backed selftest objects unregistered, so BPF_PROG_LOAD
+fails before the verifier can analyze those programs.
 
 Add hidden UML-only verification stubs for kernels without perf events.
 The primary BPF_VERIFICATION_STUBS option registers minimal

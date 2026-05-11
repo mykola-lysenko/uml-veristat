@@ -1,7 +1,7 @@
 From c835765a819bed8794aae9947b644bf729fe2bf0 Mon Sep 17 00:00:00 2001
 From: Mykola Lysenko <mykolal@meta.com>
 Date: Tue, 21 Apr 2026 14:18:09 -0400
-Subject: [PATCH 4/6] selftests/bpf: fix bpf_testmod.c compilation on UML
+Subject: [PATCH] selftests/bpf: fix bpf_testmod.c compilation on UML
 
 UML on x86-64 defines __x86_64__ (compiler macro) and CONFIG_X86_64=y,
 but its struct pt_regs wraps a uml_pt_regs { unsigned long gp[]; } array
@@ -14,8 +14,9 @@ Two guards in bpf_testmod.c incorrectly fire on UML:
   #ifdef CONFIG_X86_64      -- true on UML, but VSYSCALL_ADDR undefined
   #ifdef __x86_64__         -- true on UML, but pt_regs lacks .cx/.ax/.r11
 
-for the uprobe section already provides correct no-op stubs, so no
-functional change occurs on UML; the module now compiles cleanly.
+The existing fallback code for the uprobe section already provides
+correct no-op stubs, so no functional change occurs on UML; the module
+now compiles cleanly.
 
 Signed-off-by: Mykola Lysenko <mykolal@meta.com>
 ---
@@ -47,4 +48,3 @@ index d876314a4..412b18a9a 100644
  {
 -- 
 2.34.1
-
