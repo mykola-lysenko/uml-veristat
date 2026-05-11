@@ -10,15 +10,11 @@ This is the current cleanup list to work through before shaping the local
    - Commit messages have been tightened to read as upstream kernel commits,
      with local `uml-veristat` framing removed from patch metadata.
 
-2. Split upstream submissions by review surface.
-   - UML-only fixes: syscall wrappers, stub alignment, JIT Kconfig, and the
-     UML/x86 JIT wiring pieces.
-   - Generic BPF/libbpf fixes: duplicate BTF relocation handling and arena
-     range-tree preallocation.
-   - Selftests/veristat fixes: `bpf_testmod`, map fixups, and log-size
-     handling.
-   - RFC or controversial pieces: UML verification stubs and native x86 JIT
-     backend enablement.
+2. Split upstream submissions by review surface. (done)
+   - The proposed split is documented in
+     [`docs/upstreaming-series.md`](/home/mykolal/bpf-uml-selftests/docs/upstreaming-series.md).
+   - Keep the local patch order for CI, but post smaller upstream series by
+     subsystem and review risk.
 
 3. Rework the UML/x86 JIT backend patch for reviewer comfort.
    - Split supporting compatibility pieces from the final backend enablement
