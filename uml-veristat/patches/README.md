@@ -44,6 +44,13 @@ Similarly, `BPF_MAP_TYPE_STACK_TRACE` is not registered and the
 to fail on programs that use stack trace maps (`pyperf*`, `strobemeta*`,
 `stacktrace_*`).
 
+Also, `bpf_trace_printk()` and `bpf_trace_vprintk()` are normally provided by
+`kernel/trace/bpf_trace.c`, which is compiled under `CONFIG_BPF_EVENTS`. UML's
+verification-only config intentionally has no `BPF_EVENTS`, so the weak
+`bpf_get_trace_printk_proto()`/`bpf_get_trace_vprintk_proto()` fallbacks return
+`NULL`. That makes otherwise valid `bpf_printk()` users fail during verification
+with `program of this type cannot use helper bpf_trace_printk#6`.
+
 **Fix:** Add hidden UML-only verification stub configs:
 
 - `CONFIG_BPF_VERIFICATION_STUBS`, available only for UML kernels with
@@ -67,7 +74,11 @@ Together these configs:
    `CONFIG_BPF_VERIFICATION_STUBS`, mirroring the existing
    `CONFIG_PERF_EVENTS` guard.
 
-4. Registers `BPF_PROG_TYPE_LSM`, `BPF_MAP_TYPE_INODE_STORAGE`, BPF LSM attach
+4. Provides verification-only `bpf_trace_printk()` and `bpf_trace_vprintk()`
+   helper prototypes. The stubs return `-EOPNOTSUPP` if ever executed; they
+   exist only so veristat can validate programs that call `bpf_printk()`.
+
+5. Registers `BPF_PROG_TYPE_LSM`, `BPF_MAP_TYPE_INODE_STORAGE`, BPF LSM attach
    target symbols, and selected LSM kfunc BTF entries only when
    `CONFIG_BPF_LSM_VERIFICATION_STUBS` is enabled.
 
@@ -80,7 +91,10 @@ Together these configs:
   configs)
 - `include/linux/perf_event.h` (declare callchain stub symbols)
 
-**Result:** veristat success rate improves from ~1,200 to 1,597 programs.
+**Result:** veristat can verify tracing program types, stack-trace users, and
+`bpf_printk()` users on UML kernels that deliberately do not enable
+`CONFIG_BPF_EVENTS`. This also keeps arena spin-lock diagnostics intact while
+allowing `arena_spin_lock.bpf.o` to pass under `uml-veristat`.
 
 ---
 
@@ -342,31 +356,6 @@ size to 64 MiB. Users can still request a larger buffer explicitly with
 
 **Impact:** Prevents verbose-mode crashes in UML while preserving explicit
 large-log opt-in behavior.
-
----
-
-## Patch 0009 — selftests/bpf: avoid trace_printk in arena spin lock fallbacks
-
-**File:** `tools/testing/selftests/bpf/libarena/include/bpf_arena_spin_lock.h`
-
-**Problem:** `arena_spin_lock.bpf.o` is a TC program using the shared arena
-spin-lock helper. The helper has `bpf_printk()` calls after `cond_break`
-fallback labels used to make retry loops verifier-bounded. Those fallback
-paths are not expected to execute, but global-function validation still checks
-them when verifying `arena_spin_lock_slowpath()`.
-
-TC programs cannot call `bpf_trace_printk()`, so the verifier rejects the whole
-object before the actual arena spin-lock path can be accepted.
-
-**Fix:** Drop the diagnostic `bpf_printk()` calls from the fallback labels and
-return the last observed lock value. The loops remain bounded for the verifier,
-and the helper remains usable from program types that do not allow
-`bpf_trace_printk()`.
-
-**Impact:** Restores `arena_spin_lock.bpf.o` as a passing arena selftest under
-`uml-veristat` on current `bpf-next`.
-
----
 
 ## Verification Notes
 

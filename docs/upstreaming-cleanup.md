@@ -47,8 +47,12 @@ This is the current cleanup list to work through before shaping the local
      currently reproducible UML gap.
    - `arena_spin_lock.bpf.o` regressed on the refreshed base because the arena
      spin-lock helper moved under `libarena/include/` and still had
-     `bpf_printk()` in `cond_break` fallback paths. Keep this covered by the
-     selftests arena spin-lock fallback patch.
+     `bpf_printk()` in `cond_break` fallback paths. The root cause is not TC
+     program-type policy: UML verification stubs do not compile
+     `kernel/trace/bpf_trace.c`, so the weak trace-printk helper prototype
+     provider returns `NULL`. Keep this covered by the UML verification-stub
+     patch's trace-printk/vprintk helper prototypes, not by modifying the
+     selftest helper.
 
 7. Generate maintainer data per final patch.
    - Run `scripts/get_maintainer.pl` from a fresh `bpf-next` tree for each

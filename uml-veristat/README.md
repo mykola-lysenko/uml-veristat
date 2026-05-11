@@ -88,12 +88,12 @@ You can override the paths to the kernel and veristat binaries using environment
 
 ## Kernel Patches
 
-The `patches/` directory contains 12 patches applied to the `bpf-next` kernel tree to enable full BPF verification on UML:
+The `patches/` directory contains 11 patches applied to the `bpf-next` kernel tree to enable full BPF verification on UML:
 
 | Patch | Description | Programs fixed |
 |-------|-------------|----------------|
 | 0001 | Add `__x64_sys_*` wrappers for BPF selftest compatibility | fentry/kprobe attach targets |
-| 0002 | Add hidden UML verification stubs for tracing, stack trace, and gated LSM support | tracing/LSM types + maps |
+| 0002 | Add hidden UML verification stubs for tracing, trace-printk helpers, stack trace, and gated LSM support | tracing/LSM types + maps, `bpf_printk()` users |
 | 0003 | Fix UML stub page alignment (`-Wl,-n` removal) | UML boot fix |
 | 0003b | Enable eBPF JIT support and default-on JIT for UML x86-64 | struct_ops + default guest JIT |
 | 0003c | Wire the native x86 BPF JIT backend into UML with runtime shims | real JIT capability hooks + clean verbose diagnostics |
@@ -103,7 +103,6 @@ The `patches/` directory contains 12 patches applied to the `bpf-next` kernel tr
 | 0006 | Preallocate arena range-tree nodes in sleepable paths | arena map creation + arena globals copied through mmap |
 | 0007 | Fix veristat map fixup for zero key_size/value_size while preserving arena zero fields | bench + cgroup maps, arena maps reach kernel allocation path |
 | 0008 | Cap veristat auto log size to avoid UML OOM | verbose log stability |
-| 0009 | Avoid `trace_printk` in arena spin-lock fallback paths | `arena_spin_lock.bpf.o` from TC/veristat contexts |
 
 ### Patch-to-Selftest Correspondence
 
@@ -114,7 +113,7 @@ The table below shows the current practical correspondence.
 | Patch | Main area | Representative selftests or classes unlocked |
 |-------|-----------|----------------------------------------------|
 | 0001 | x86-64 syscall wrapper BTF attach targets on UML | Syscall attach-target tests using `SYS_PREFIX`, such as `bpf_syscall_macro.c` and other `__x64_sys_*` kprobe/fentry/raw_tp cases |
-| 0002 | verification-only tracing/LSM/stack-trace support without `PERF_EVENTS` | Tracing-type and stack-trace users such as `pyperf*`, `strobemeta*`, `stacktrace_*`, plus LSM/storage-style cases like `local_storage`, `map_kptr`, `map_ptr_kern`, `test_get_xattr`, `test_map_in_map`, `verifier_vfs_reject` |
+| 0002 | verification-only tracing/LSM/stack-trace support without `PERF_EVENTS`, plus `bpf_trace_printk()`/`bpf_trace_vprintk()` helper prototypes without `BPF_EVENTS` | Tracing-type and stack-trace users such as `pyperf*`, `strobemeta*`, `stacktrace_*`; `bpf_printk()` users such as `trace_printk.bpf.o`, `test_tunnel_kern.bpf.o`, and `arena_spin_lock.bpf.o`; plus LSM/storage-style cases like `local_storage`, `map_kptr`, `map_ptr_kern`, `test_get_xattr`, `test_map_in_map`, `verifier_vfs_reject` |
 | 0003 | UML boot fix | Global prerequisite: all `uml-veristat` selftests depend on the UML guest booting at all |
 | 0003b | JIT enablement and default-on JIT | Struct-ops and JIT-gated program classes, including `struct_ops_*`, `tcp_ca_*`, and early kfunc-capable loads |
 | 0003c | Real x86 JIT capability hooks in UML, plus the UML runtime shims needed to link and use the backend for verification | Kfunc-using objects that used to fail with `JIT does not support calling kernel function`, such as `test_send_signal_kern.bpf.o`, `xfrm_info.bpf.o`, and parts of `test_tunnel_kern.bpf.o`; also suppresses `text_poke()` WARN noise in verbose-mode diagnostics |
@@ -124,7 +123,6 @@ The table below shows the current practical correspondence.
 | 0006 | Sleepable arena range-tree bootstrap and user-fault split preallocation | Arena map creation for `arena_*`, `stream.bpf.o`, and `verifier_arena*` objects that previously failed at the first full-range insertion; arena globals copied through libbpf mmap, including `arena_htab.bpf.o`, `arena_spin_lock.bpf.o`, and `verifier_arena_globals1.bpf.o` |
 | 0007 | `veristat` map fixups for harness-shaped objects while preserving map types that require zero key/value sizes | `bloom_filter_bench.bpf.o`, `bpf_hashmap_lookup.bpf.o`, `htab_mem_bench.bpf.o`; arena maps keep their required zero key/value sizes and reach the kernel arena paths |
 | 0008 | Stable verbose verifier logging under UML memory limits | Diagnostic coverage for failing objects in `-vl2` mode, especially `test_send_signal_kern.bpf.o`, `xfrm_info.bpf.o`, and `test_tunnel_kern.bpf.o` |
-| 0009 | Program-type-neutral arena spin-lock fallback paths | `arena_spin_lock.bpf.o`, whose slow-path global-function validation otherwise sees `bpf_trace_printk()` from a TC program type and fails before runtime |
 
 For upstreaming work, use the generated comparison report in
 [`docs/patch-impact.md`](/home/mykolal/bpf-uml-selftests/docs/patch-impact.md)

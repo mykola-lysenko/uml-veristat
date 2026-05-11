@@ -13,6 +13,10 @@ Add hidden UML-only verification stubs for kernels without perf events.
 The primary BPF_VERIFICATION_STUBS option registers minimal
 verifier_ops/prog_ops for tracing program types and provides callchain
 stubs so BPF_MAP_TYPE_STACK_TRACE can be created for load-time analysis.
+It also provides verification-only bpf_trace_printk and bpf_trace_vprintk
+helper prototypes so programs using bpf_printk() can still be verified when
+CONFIG_BPF_EVENTS is absent. The helper stubs return -EOPNOTSUPP if ever
+executed.
 
 Keep the LSM-facing surface behind a separate hidden
 BPF_LSM_VERIFICATION_STUBS option that also requires CONFIG_SECURITY.
@@ -29,9 +33,9 @@ Signed-off-by: Mykola Lysenko <mykolal@meta.com>
  include/linux/perf_event.h          |  17 +-
  kernel/bpf/Kconfig                  |  29 ++
  kernel/bpf/Makefile                 |   6 +-
- kernel/bpf/bpf_verification_stubs.c | 446 ++++++++++++++++++++++++++++
+ kernel/bpf/bpf_verification_stubs.c | 488 ++++++++++++++++++++++++++++
  kernel/bpf/stackmap.c               |   2 +
- 7 files changed, 505 insertions(+), 11 deletions(-)
+ 7 files changed, 547 insertions(+), 11 deletions(-)
  create mode 100644 kernel/bpf/bpf_verification_stubs.c
 
 diff --git a/include/linux/bpf_lsm.h b/include/linux/bpf_lsm.h
@@ -207,7 +211,7 @@ new file mode 100644
 index 000000000..cb4ece330
 --- /dev/null
 +++ b/kernel/bpf/bpf_verification_stubs.c
-@@ -0,0 +1,446 @@
+@@ -0,0 +1,488 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * BPF program type stubs for verification-only kernels (e.g. UML)
@@ -219,6 +223,8 @@ index 000000000..cb4ece330
 + *
 + * Tracing stubs: KPROBE, TRACEPOINT, PERF_EVENT, RAW_TRACEPOINT,
 + *   RAW_TRACEPOINT_WRITABLE, TRACING + STACK_TRACE map support.
++ * Trace printk helpers: verification-only bpf_trace_printk and
++ *   bpf_trace_vprintk prototypes for bpf_printk() users.
 + *
 + * LSM stubs (when CONFIG_BPF_LSM_VERIFICATION_STUBS is set):
 + *   BPF_PROG_TYPE_LSM, BPF_MAP_TYPE_INODE_STORAGE, bpf_lsm_* BTF attach
@@ -233,6 +239,46 @@ index 000000000..cb4ece330
 +#include <linux/pid.h>
 +
 +/* --- Tracing program type stubs --- */
++
++BPF_CALL_5(bpf_trace_printk, char *, fmt, u32, fmt_size, u64, arg1,
++	   u64, arg2, u64, arg3)
++{
++	return -EOPNOTSUPP;
++}
++
++static const struct bpf_func_proto bpf_trace_printk_proto = {
++	.func		= bpf_trace_printk,
++	.gpl_only	= true,
++	.ret_type	= RET_INTEGER,
++	.arg1_type	= ARG_PTR_TO_MEM | MEM_RDONLY,
++	.arg2_type	= ARG_CONST_SIZE,
++};
++
++const struct bpf_func_proto *bpf_get_trace_printk_proto(void)
++{
++	return &bpf_trace_printk_proto;
++}
++
++BPF_CALL_4(bpf_trace_vprintk, char *, fmt, u32, fmt_size,
++	   const void *, args, u32, data_len)
++{
++	return -EOPNOTSUPP;
++}
++
++static const struct bpf_func_proto bpf_trace_vprintk_proto = {
++	.func		= bpf_trace_vprintk,
++	.gpl_only	= true,
++	.ret_type	= RET_INTEGER,
++	.arg1_type	= ARG_PTR_TO_MEM | MEM_RDONLY,
++	.arg2_type	= ARG_CONST_SIZE,
++	.arg3_type	= ARG_PTR_TO_MEM | PTR_MAYBE_NULL | MEM_RDONLY,
++	.arg4_type	= ARG_CONST_SIZE_OR_ZERO,
++};
++
++const struct bpf_func_proto *bpf_get_trace_vprintk_proto(void)
++{
++	return &bpf_trace_vprintk_proto;
++}
 +
 +static const struct bpf_func_proto *
 +stub_tracing_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
