@@ -14,50 +14,48 @@ max_entries == 0 by setting it to 1, but does not fix up zero key_size
 or value_size.  This causes bpf_object__prepare() to fail with EINVAL
 (-22) from the kernel's map_create path.
 
-Add fixups for value_size and key_size in the same default case that
-already handles max_entries.  Bloom filters, queues, and stacks are
-excluded from the key_size fixup since they use key_size == 0 by design.
-
-Ringbuf and user_ringbuf maps require key_size == 0 and value_size == 0,
-so they are handled in a separate case that only fixes up max_entries
-to a page-aligned value (4096) when unset.
+Add fixups for value_size and key_size for ordinary array, hash, and
+bloom-filter maps after applying the existing max_entries fixup. Bloom
+filters keep key_size == 0 by design, so only max_entries and value_size
+are fixed up for them.
 
 Also add BPF_MAP_TYPE_PERCPU_CGROUP_STORAGE to the exclusion list
 alongside CGROUP_STORAGE, since percpu cgroup storage requires
 max_entries == 0 and would fail if set to 1.
 
-Arena maps also require key_size == 0 and value_size == 0, so exclude
-them from the generic fixups as well.
-
 Signed-off-by: Mykola Lysenko <mykolal@meta.com>
 ---
- tools/testing/selftests/bpf/veristat.c | 14 ++++++++++++++
- 1 file changed, 14 insertions(+)
+ tools/testing/selftests/bpf/veristat.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
 
 diff --git a/tools/testing/selftests/bpf/veristat.c b/tools/testing/selftests/bpf/veristat.c
-index 5c82950e6..b95e4d691 100644
+index 5c82950e6..f27640220 100644
 --- a/tools/testing/selftests/bpf/veristat.c
 +++ b/tools/testing/selftests/bpf/veristat.c
-@@ -1253,9 +1253,23 @@ static void fixup_obj_maps(struct bpf_object *obj)
+@@ -1253,9 +1253,27 @@ static void fixup_obj_maps(struct bpf_object *obj)
  		case BPF_MAP_TYPE_CGRP_STORAGE:
 +		case BPF_MAP_TYPE_PERCPU_CGROUP_STORAGE:
  		case BPF_MAP_TYPE_STRUCT_OPS:
-+		case BPF_MAP_TYPE_ARENA:
  			break;
-+		case BPF_MAP_TYPE_RINGBUF:
-+		case BPF_MAP_TYPE_USER_RINGBUF:
-+			if (bpf_map__max_entries(map) == 0)
-+				bpf_map__set_max_entries(map, 4096);
-+			break;
  		default:
  			if (bpf_map__max_entries(map) == 0)
  				bpf_map__set_max_entries(map, 1);
++			switch (bpf_map__type(map)) {
++			case BPF_MAP_TYPE_ARRAY:
++			case BPF_MAP_TYPE_PERCPU_ARRAY:
++			case BPF_MAP_TYPE_HASH:
++			case BPF_MAP_TYPE_PERCPU_HASH:
++			case BPF_MAP_TYPE_LRU_HASH:
++			case BPF_MAP_TYPE_LRU_PERCPU_HASH:
++			case BPF_MAP_TYPE_BLOOM_FILTER:
++				break;
++			default:
++				continue;
++			}
 +			if (bpf_map__value_size(map) == 0)
 +				bpf_map__set_value_size(map, 1);
 +			if (bpf_map__key_size(map) == 0 &&
-+			    bpf_map__type(map) != BPF_MAP_TYPE_BLOOM_FILTER &&
-+			    bpf_map__type(map) != BPF_MAP_TYPE_QUEUE &&
-+			    bpf_map__type(map) != BPF_MAP_TYPE_STACK)
++			    bpf_map__type(map) != BPF_MAP_TYPE_BLOOM_FILTER)
 +				bpf_map__set_key_size(map, 4);
  		}
  	}
