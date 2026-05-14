@@ -18,10 +18,16 @@ relocation ambiguity.
 This mirrors duplicate compatible base-candidate handling in
 btf_relocate.c.
 
+Add a core_reloc selftest with duplicate compatible target BTF types to
+cover the safe TYPE_ID_TARGET ambiguity case.
+
 Signed-off-by: Mykola Lysenko <mykolal@meta.com>
 ---
- tools/lib/bpf/relo_core.c | 12 ++++++++++++
- 1 file changed, 12 insertions(+)
+ tools/lib/bpf/relo_core.c                     | 12 ++++++++++++
+ .../selftests/bpf/prog_tests/core_reloc.c     |  1 +
+ ...tf__core_reloc_type_id___dup_compat_types.c |  4 ++++
+ .../selftests/bpf/progs/core_reloc_types.h    | 14 ++++++++++++++
+ 4 files changed, 31 insertions(+)
 
 diff --git a/tools/lib/bpf/relo_core.c b/tools/lib/bpf/relo_core.c
 index 6ae3f2a15..9de6cfec0 100644
@@ -46,6 +52,52 @@ index 6ae3f2a15..9de6cfec0 100644
  			/* all candidates should result in the same relocation
  			 * decision and value, otherwise it's dangerous to
  			 * proceed due to ambiguity
+diff --git a/tools/testing/selftests/bpf/prog_tests/core_reloc.c b/tools/testing/selftests/bpf/prog_tests/core_reloc.c
+index 08963c82f..aedb649ef 100644
+--- a/tools/testing/selftests/bpf/prog_tests/core_reloc.c
++++ b/tools/testing/selftests/bpf/prog_tests/core_reloc.c
+@@ -889,6 +889,7 @@ static const struct core_reloc_test_case test_cases[] = {
+ 
+ 	/* BTF_TYPE_ID_LOCAL/BTF_TYPE_ID_TARGET tests */
+ 	TYPE_ID_CASE(type_id, setup_type_id_case_success),
++	TYPE_ID_CASE(type_id___dup_compat_types, setup_type_id_case_success),
+ 	TYPE_ID_CASE(type_id___missing_targets, setup_type_id_case_failure),
+ 
+ 	/* Enumerator value existence and value relocations */
+diff --git a/tools/testing/selftests/bpf/progs/btf__core_reloc_type_id___dup_compat_types.c b/tools/testing/selftests/bpf/progs/btf__core_reloc_type_id___dup_compat_types.c
+new file mode 100644
+index 000000000..a7b4c2951
+--- /dev/null
++++ b/tools/testing/selftests/bpf/progs/btf__core_reloc_type_id___dup_compat_types.c
+@@ -0,0 +1,4 @@
++// SPDX-License-Identifier: GPL-2.0
++#include "core_reloc_types.h"
++
++void f(struct core_reloc_type_id___dup_compat_types x) {}
+diff --git a/tools/testing/selftests/bpf/progs/core_reloc_types.h b/tools/testing/selftests/bpf/progs/core_reloc_types.h
+index 5760ae015..081a3f195 100644
+--- a/tools/testing/selftests/bpf/progs/core_reloc_types.h
++++ b/tools/testing/selftests/bpf/progs/core_reloc_types.h
+@@ -1196,6 +1196,20 @@ struct core_reloc_type_id {
+ 	arr_typedef f6;
+ };
+ 
++struct a_struct___dup_compat {
++	int x;
++};
++
++struct core_reloc_type_id___dup_compat_types {
++	struct a_struct f1;
++	struct a_struct___dup_compat f2;
++	union a_union f3;
++	enum an_enum f4;
++	named_struct_typedef f5;
++	func_proto_typedef f6;
++	arr_typedef f7;
++};
++
+ struct core_reloc_type_id___missing_targets {
+ 	/* nothing */
+ };
 -- 
 2.53.0-Meta
-
