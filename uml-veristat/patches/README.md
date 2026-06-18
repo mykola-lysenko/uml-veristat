@@ -309,35 +309,51 @@ data at non-edge offsets now process normally, including `arena_htab.bpf.o`,
 
 ---
 
-## Patch 0007 — selftests/bpf: veristat: fix up zero key_size and value_size in maps
+## Patch 0007 — selftests/bpf: make benchmark map definitions standalone-loadable
+
+**Files:**
+- `tools/testing/selftests/bpf/progs/bloom_filter_bench.c`
+- `tools/testing/selftests/bpf/progs/bpf_hashmap_lookup.c`
+- `tools/testing/selftests/bpf/progs/htab_mem_bench.c`
+
+**Problem:** Benchmark programs (`bloom_filter_bench`, `bpf_hashmap_lookup`,
+`htab_mem_bench`) intentionally let their userspace benchmark harnesses resize
+and retune maps before loading. As raw `.bpf.o` inputs, though, those maps can
+have zero `key_size`, `value_size`, or `max_entries`, so standalone loaders such
+as `veristat` fail in `BPF_MAP_CREATE` before the verifier sees any program.
+
+**Fix:** Give the benchmark maps small valid defaults:
+- `bloom_filter_bench`: default `value_size` and `max_entries` for the array
+  and bloom filter maps, and default `key_size`, `value_size`, and
+  `max_entries` for the hash map.
+- `bpf_hashmap_lookup`: default hash map key size, value size, and entry count.
+- `htab_mem_bench`: default hash map value size and entry count.
+
+The benchmark harnesses still call `bpf_map__set_*()` before load, so runtime
+benchmark behavior remains configurable.
+
+**Impact:** Fixes `bloom_filter_bench.bpf.o`, `bpf_hashmap_lookup.bpf.o`, and
+`htab_mem_bench.bpf.o` (3 files, `-EINVAL`) without requiring veristat to guess
+map dimensions.
+
+---
+
+## Patch 0007b — selftests/bpf: veristat: preserve zero max_entries for percpu cgroup storage
 
 **File:** `tools/testing/selftests/bpf/veristat.c`
 
-**Problem:** Benchmark programs (`bloom_filter_bench`, `bpf_hashmap_lookup`,
-`htab_mem_bench`) define maps with zero `key_size` and/or `value_size`, expecting
-the benchmark harness to fill these at runtime. Veristat's `fixup_obj_maps()`
-already handles `max_entries == 0` but does not fix up zero `key_size` or
-`value_size`, causing `bpf_object__prepare()` to fail with `-EINVAL` from the
-kernel's `map_create` path.
+**Problem:** Veristat's `fixup_obj_maps()` sets `max_entries = 1` for most maps
+whose object metadata leaves `max_entries` at zero. It already excludes cgroup
+storage maps because they require `max_entries == 0`, but it missed
+`BPF_MAP_TYPE_PERCPU_CGROUP_STORAGE`, which has the same requirement. Rewriting
+that field produces false `BPF_MAP_CREATE -EINVAL` file-level failures.
 
-At the same time, some map types require zero sizes by design. Most notably,
-`BPF_MAP_TYPE_ARENA` must keep `key_size == 0` and `value_size == 0`, so a
-generic "fix every zero-sized map" policy turns arena programs into a false
-`-EINVAL` failure before they even reach the real kernel allocation path.
+**Fix:** Add `BPF_MAP_TYPE_PERCPU_CGROUP_STORAGE` to the max-entries fixup
+exclusion list.
 
-**Fix:** Extend `fixup_obj_maps()` to set `value_size = 1` and `key_size = 4`
-when they are zero.  Map types that require zero by design are excluded:
-- Bloom filters, queues, and stacks: `key_size == 0` is valid
-- Ringbuf and user_ringbuf: both `key_size == 0` and `value_size == 0` are
-  required; these maps get a separate `max_entries = 4096` fixup (page-aligned
-  power-of-2) instead
-- Arena: both `key_size == 0` and `value_size == 0` are required, so arena maps
-  are excluded from the generic fixups as well
-
-**Impact:** Fixes `bloom_filter_bench.bpf.o`, `bpf_hashmap_lookup.bpf.o`,
-`htab_mem_bench.bpf.o` (3 files, -22 EINVAL), and removes the false `-22`
-arena failures so arena objects now surface the real kernel-side `-12 ENOMEM`
-allocator limitation on UML.
+**Impact:** Fixes percpu cgroup storage users such as `map_ptr_kern.bpf.o`,
+`netcnt_prog.bpf.o`, `percpu_alloc_array.bpf.o`,
+`tailcall_cgrp_storage*.bpf.o`, and `verifier_cgroup_storage.bpf.o`.
 
 ---
 

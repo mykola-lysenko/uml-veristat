@@ -88,7 +88,7 @@ You can override the paths to the kernel and veristat binaries using environment
 
 ## Kernel Patches
 
-The `patches/` directory contains 11 patches applied to the `bpf-next` kernel tree to enable full BPF verification on UML:
+The `patches/` directory contains 12 patches applied to the `bpf-next` kernel tree to enable full BPF verification on UML:
 
 | Patch | Description | Programs fixed |
 |-------|-------------|----------------|
@@ -101,7 +101,8 @@ The `patches/` directory contains 11 patches applied to the `bpf-next` kernel tr
 | 0005 | Tolerate duplicate base BTF candidates during split-BTF relocation | btf_relocate |
 | 0005b | Tolerate duplicate target type IDs during CO-RE relocation | `bpf_core_cast()` / `bpf_rdonly_cast()` users |
 | 0006 | Preallocate arena range-tree nodes in sleepable paths | arena map creation + arena globals copied through mmap |
-| 0007 | Fix veristat map fixup for zero key_size/value_size while preserving arena zero fields | bench + cgroup maps, arena maps reach kernel allocation path |
+| 0007 | Add standalone defaults to benchmark map definitions | benchmark objects with harness-resized maps |
+| 0007b | Preserve zero `max_entries` for percpu cgroup storage in veristat | percpu cgroup storage maps |
 | 0008 | Cap veristat auto log size to avoid UML OOM | verbose log stability |
 
 ### Patch-to-Selftest Correspondence
@@ -121,7 +122,8 @@ The table below shows the current practical correspondence.
 | 0005 | Duplicate base-BTF candidate handling for split-BTF relocation | `bpf_testmod` module-BTF registration, which unblocks module-backed classes such as `struct_ops_*`, `kfunc_call_*`, `iters_testmod*`, `kprobe_multi*`, and `epilogue_*` |
 | 0005b | Duplicate target-type handling for CO-RE `BPF_CORE_TYPE_ID_TARGET` relocations | `bpf_rdonly_cast()` users such as `getpeername_unix_prog.bpf.o`, `getsockname_unix_prog.bpf.o`, and `sendmsg_unix_prog.bpf.o` when vmlinux BTF contains duplicate compatible `struct sockaddr_un` candidates |
 | 0006 | Sleepable arena range-tree bootstrap and user-fault split preallocation | Arena map creation for `arena_*`, `stream.bpf.o`, and `verifier_arena*` objects that previously failed at the first full-range insertion; arena globals copied through libbpf mmap, including `arena_htab.bpf.o`, `arena_spin_lock.bpf.o`, and `verifier_arena_globals1.bpf.o` |
-| 0007 | `veristat` map fixups for harness-shaped objects while preserving map types that require zero key/value sizes | `bloom_filter_bench.bpf.o`, `bpf_hashmap_lookup.bpf.o`, `htab_mem_bench.bpf.o`; arena maps keep their required zero key/value sizes and reach the kernel arena paths |
+| 0007 | Standalone-loadable defaults for benchmark maps that are resized by their userspace harnesses | `bloom_filter_bench.bpf.o`, `bpf_hashmap_lookup.bpf.o`, and `htab_mem_bench.bpf.o` no longer require veristat-specific key/value-size guessing |
+| 0007b | `veristat` max-entries fixup exclusion for percpu cgroup storage | `map_ptr_kern.bpf.o`, `netcnt_prog.bpf.o`, `percpu_alloc_array.bpf.o`, `tailcall_cgrp_storage*.bpf.o`, and `verifier_cgroup_storage.bpf.o` avoid false `BPF_MAP_CREATE -EINVAL` failures |
 | 0008 | Stable verbose verifier logging under UML memory limits | Diagnostic coverage for failing objects in `-vl2` mode, especially `test_send_signal_kern.bpf.o`, `xfrm_info.bpf.o`, and `test_tunnel_kern.bpf.o` |
 
 For upstreaming work, use the generated comparison report in

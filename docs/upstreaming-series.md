@@ -98,11 +98,16 @@ Status: mostly ready, but should be framed as generic veristat robustness.
 
 Patches:
 
-- `0007-selftests-bpf-veristat-fix-up-zero-key_size-and-valu.patch`
+- `0007-selftests-bpf-make-benchmark-map-definitions-standal.patch`
   - Audience: BPF selftests maintainers.
-  - Rationale: veristat should fill in harness-provided map dimensions for
-    standalone analysis while preserving map types that intentionally require
-    zero key or value sizes.
+  - Rationale: benchmark BPF objects should carry small valid default map
+    dimensions even when the benchmark harness overrides them before load.
+  - Dependency: none.
+
+- `0007b-selftests-bpf-veristat-preserve-zero-max_entries-for.patch`
+  - Audience: BPF selftests maintainers.
+  - Rationale: veristat should not rewrite `max_entries` for percpu cgroup
+    storage maps, which require `max_entries == 0` just like cgroup storage.
   - Dependency: none.
 
 - `0008-selftests-bpf-veristat-cap-auto-log-size-to-avoid-o.patch`
@@ -113,9 +118,12 @@ Patches:
 
 Suggested posting shape:
 
-- Send as a two-patch selftests/veristat series.
-- Include before/after examples from `veristat` on the affected benchmark maps
-  and verbose logging path.
+- Send `0007` as a standalone selftests cleanup; it is about making benchmark
+  objects self-describing, not changing veristat policy.
+- Send `0007b` as a tiny veristat correctness fix with before/after examples
+  from percpu cgroup storage objects.
+- Hold `0008` unless we can show a generic constrained-runner failure mode
+  outside UML.
 
 ## Series D: UML BPF Verification RFC
 
