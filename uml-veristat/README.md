@@ -84,7 +84,7 @@ You can override the paths to the kernel and veristat binaries using environment
 - `VERISTAT`: Path to the veristat binary (default: `~/.local/share/uml-veristat/veristat`)
 - `UML_MEM`: Memory to allocate to the UML guest (default: `512M`)
 - `UML_VERBOSE`: Set to `1` to see the full UML kernel boot log (useful for debugging kernel panics)
-- `UML_MODULES`: Path to a kernel module (`.ko`) to load before running veristat (e.g. `bpf_testmod.ko`)
+- `UML_MODULES`: Space-separated kernel modules (`.ko`) to load before running veristat (defaults to the installed BPF selftest modules; set to `""` to disable)
 
 ## Kernel Patches
 

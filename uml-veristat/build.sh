@@ -8,7 +8,7 @@
 #
 #   linux           — UML kernel binary (bpf-next master, with BPF enabled)
 #   veristat        — veristat binary (built from the same bpf-next tree)
-#   bpf_testmod.ko  — BPF test module (auto-loaded by uml-veristat via UML_MODULES)
+#   bpf_test*.ko    — BPF selftest modules (auto-loaded by uml-veristat via UML_MODULES)
 #   selftests/      — BPF selftest .bpf.o files (ready inputs for uml-veristat)
 #
 # Also builds LLVM/Clang (either from source or as a pre-built nightly
@@ -176,7 +176,7 @@ for arg in "$@"; do
             echo "  --rebuild-kernel     Rebuild UML kernel"
             echo "  --rebuild-bpftool    Rebuild bpftool"
             echo "  --rebuild-selftests  Rebuild veristat and BPF selftests"
-            echo "  --rebuild-testmod    Rebuild bpf_testmod.ko"
+            echo "  --rebuild-testmod    Rebuild BPF selftest modules"
             echo ""
             echo "Environment:"
             echo "  LLVM_INSTALL=PATH   Use an existing LLVM install prefix (default: .build/llvm-install)."
@@ -211,8 +211,14 @@ fi
 INSTALL_DIR="${HOME}/.local/share/uml-veristat${MODE_SUFFIX}"
 SELFTESTS_OUTPUT="${WORKDIR}/selftests-output${MODE_SUFFIX}"
 BPFTOOL_OUTPUT="${WORKDIR}/bpftool-output${MODE_SUFFIX}"
-TESTMOD_PACKAGE_SRC=""
 KERNEL_BUILT_THIS_RUN=0
+KERNEL_TREE_CHANGED=0
+AUTOLOAD_TEST_KMODS=(
+    bpf_testmod
+    bpf_test_modorder_x
+    bpf_test_modorder_y
+)
+TESTMOD_PACKAGE_SRCS=()
 
 mkdir -p "${WORKDIR}" "${INSTALL_DIR}"
 info "Build flavor: ${BUILD_FLAVOR}"
@@ -229,7 +235,7 @@ skipped_patches: ${SKIP_PATCHES_RAW}
 bpf-next: ${KERNEL_COMMIT} (${KERNEL_VERSION})
 LLVM: ${LLVM_COMMIT}
 pahole: ${PAHOLE_TAG}
-bpf_testmod: ${testmod_status}
+bpf_test_modules: ${testmod_status}
 EOF
 }
 
@@ -242,19 +248,72 @@ install_core_artifacts() {
     write_version_manifest "${1:-pending}"
 }
 
+autoload_test_kmod_files() {
+    local module
+    local files=()
+
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        files+=("${module}.ko")
+    done
+    echo "${files[*]}"
+}
+
+all_test_kmods_in_tree() {
+    local module
+
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        [ -f "${SELFTESTS_DIR}/test_kmods/${module}.ko" ] || return 1
+    done
+    return 0
+}
+
+all_test_kmods_installed() {
+    local module
+
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        [ -f "${INSTALL_DIR}/${module}.ko" ] || return 1
+    done
+    return 0
+}
+
+remove_test_kmods_from_tree() {
+    local module
+
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        rm -f "${SELFTESTS_DIR}/test_kmods/${module}.ko"
+    done
+}
+
+remove_installed_test_kmods() {
+    local module
+
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        rm -f "${INSTALL_DIR}/${module}.ko"
+    done
+}
+
 finalize_testmod_install() {
     local testmod_status
+    local module src installed
 
     if [ "${TESTMOD_AVAILABLE}" = "1" ]; then
-        cp "${TESTMOD_KO_SRC}" "${INSTALL_DIR}/bpf_testmod.ko"
-        TESTMOD_PACKAGE_SRC="${TESTMOD_KO_SRC}"
-        testmod_status="available"
-    elif [ "${KEEP_INSTALLED_TESTMOD}" = "1" ] && [ -f "${INSTALL_DIR}/bpf_testmod.ko" ]; then
-        TESTMOD_PACKAGE_SRC="${INSTALL_DIR}/bpf_testmod.ko"
-        testmod_status="reused-installed"
+        TESTMOD_PACKAGE_SRCS=()
+        for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+            src="${SELFTESTS_DIR}/test_kmods/${module}.ko"
+            cp "${src}" "${INSTALL_DIR}/${module}.ko"
+            TESTMOD_PACKAGE_SRCS+=("${src}")
+        done
+        testmod_status="available: $(autoload_test_kmod_files)"
+    elif [ "${KEEP_INSTALLED_TESTMOD}" = "1" ] && all_test_kmods_installed; then
+        TESTMOD_PACKAGE_SRCS=()
+        for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+            installed="${INSTALL_DIR}/${module}.ko"
+            TESTMOD_PACKAGE_SRCS+=("${installed}")
+        done
+        testmod_status="reused-installed: $(autoload_test_kmod_files)"
     else
-        rm -f "${INSTALL_DIR}/bpf_testmod.ko"
-        TESTMOD_PACKAGE_SRC=""
+        remove_installed_test_kmods
+        TESTMOD_PACKAGE_SRCS=()
         testmod_status="unavailable"
     fi
 
@@ -697,6 +756,7 @@ if [ -d "${PATCHES_DIR}" ]; then
         git -C "${LINUX_DIR}" am --abort >/dev/null 2>&1 || true
         git -C "${LINUX_DIR}" reset --hard "${UPSTREAM_REF}"
         git -C "${LINUX_DIR}" clean -fd
+        KERNEL_TREE_CHANGED=1
         KERNEL_COMMIT=$(git -C "${LINUX_DIR}" rev-parse --short HEAD)
         KERNEL_VERSION=$(make -C "${LINUX_DIR}" -s kernelversion 2>/dev/null || echo "unknown")
         info "Reset kernel tree to ${KERNEL_COMMIT}  (${KERNEL_VERSION})"
@@ -722,6 +782,7 @@ if [ -d "${PATCHES_DIR}" ]; then
                     git -C "${LINUX_DIR}" am --abort >/dev/null 2>&1 || true
                     git -C "${LINUX_DIR}" am --3way --whitespace=nowarn "${patch}"
                 fi
+                KERNEL_TREE_CHANGED=1
             fi
         done
     else
@@ -798,7 +859,7 @@ for candidate in linux vmlinux; do
     fi
 done
 
-if [ -z "${UML_BINARY}" ] || [ "${REBUILD_KERNEL}" = "1" ] || [ "${DO_UPDATE}" = "1" ]; then
+if [ -z "${UML_BINARY}" ] || [ "${REBUILD_KERNEL}" = "1" ] || [ "${DO_UPDATE}" = "1" ] || [ "${KERNEL_TREE_CHANGED}" = "1" ]; then
     info "Building UML kernel..."
     make ARCH=um PAHOLE="${PAHOLE_BIN}" -j"$(nproc)"
     KERNEL_BUILT_THIS_RUN=1
@@ -913,70 +974,80 @@ info "veristat: ${VERISTAT_BIN}"
 BPF_OBJ_COUNT=$(find "${SELFTESTS_OUTPUT}" -name "*.bpf.o" 2>/dev/null | wc -l)
 info "BPF object files built: ${BPF_OBJ_COUNT} files in ${SELFTESTS_OUTPUT}/"
 
-# --- 7c: build bpf_testmod.ko for the UML kernel ---
-# bpf_testmod.ko provides the bpf_testmod_ops struct_ops types and kfuncs that
-# many BPF selftest programs depend on.  It is built as an external module
-# against the UML kernel tree (ARCH=um) so it runs inside the UML guest.
-# uml-veristat auto-loads it via UML_MODULES before running veristat.
+# --- 7c: build BPF selftest modules for the UML kernel ---
+# bpf_testmod.ko provides struct_ops types and kfuncs that many BPF selftest
+# programs depend on. bpf_test_modorder_x/y.ko provide module-kfunc BTF for
+# kfunc_module_order.bpf.o. These are built as external modules against the UML
+# kernel tree (ARCH=um) so they run inside the UML guest.
 #
-# Only bpf_testmod.ko is built here; the other test_kmods (bpf_test_rqspinlock,
-# etc.) require CONFIG_PERF_EVENTS which is not available on UML.
-TESTMOD_KO_SRC="${SELFTESTS_DIR}/test_kmods/bpf_testmod.ko"
+# Keep this list narrow: other test_kmods such as bpf_test_rqspinlock.ko require
+# CONFIG_PERF_EVENTS, which is not available on UML.
 TESTMOD_AVAILABLE=0
 KEEP_INSTALLED_TESTMOD=0
 TESTMOD_BUILD_FAILED=0
-INSTALLED_TESTMOD="${INSTALL_DIR}/bpf_testmod.ko"
 
 install_core_artifacts "pending"
 
 TESTMOD_BUILD_NEEDED=0
-if [ "${REBUILD_TESTMOD}" = "1" ] || [ "${REBUILD_KERNEL}" = "1" ] || [ "${DO_UPDATE}" = "1" ]; then
+if [ "${REBUILD_TESTMOD}" = "1" ] || \
+   [ "${REBUILD_KERNEL}" = "1" ] || \
+   [ "${DO_UPDATE}" = "1" ] || \
+   [ "${KERNEL_BUILT_THIS_RUN}" = "1" ]; then
     TESTMOD_BUILD_NEEDED=1
-elif [ ! -f "${TESTMOD_KO_SRC}" ]; then
-    if [ -f "${INSTALLED_TESTMOD}" ]; then
+elif ! all_test_kmods_in_tree; then
+    if all_test_kmods_installed; then
         KEEP_INSTALLED_TESTMOD=1
-        info "bpf_testmod.ko is missing from the build tree; keeping the installed copy."
+        info "BPF selftest modules are missing from the build tree; keeping the installed copies."
     else
         TESTMOD_BUILD_NEEDED=1
     fi
 fi
 
 if [ "${TESTMOD_BUILD_NEEDED}" = "1" ]; then
-    info "Building bpf_testmod.ko for UML..."
-    rm -f "${TESTMOD_KO_SRC}"
+    info "Building BPF selftest modules for UML: $(autoload_test_kmod_files)"
+    remove_test_kmods_from_tree
     # Ensure Module.symvers is up to date before building the module.
     # A quick incremental 'make ARCH=um' (no sources changed) regenerates
     # Module.symvers in ~30 seconds without recompiling anything.
-    make -C "${LINUX_DIR}" ARCH=um PAHOLE="${PAHOLE_BIN}" -j"$(nproc)" 2>&1 | tail -3
-    # Build only bpf_testmod.ko (not the full test_kmods set, which includes
-    # modules that require CONFIG_PERF_EVENTS unavailable on UML).
+    make -C "${LINUX_DIR}" ARCH=um PAHOLE="${PAHOLE_BIN}" -j"$(nproc)"
+    # Build only the module-backed veristat prerequisites, not the full
+    # test_kmods set.
     TESTMOD_BUILD_STATUS=0
+    TESTMOD_TARGETS=()
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        TESTMOD_TARGETS+=("${module}.ko")
+    done
     make -C "${LINUX_DIR}" ARCH=um PAHOLE="${PAHOLE_BIN}" \
-        M="${SELFTESTS_DIR}/test_kmods" bpf_testmod.ko 2>&1 || TESTMOD_BUILD_STATUS=$?
+        M="${SELFTESTS_DIR}/test_kmods" "${TESTMOD_TARGETS[@]}" 2>&1 || TESTMOD_BUILD_STATUS=$?
     if [ "${TESTMOD_BUILD_STATUS}" -ne 0 ]; then
         TESTMOD_BUILD_FAILED=1
-        rm -f "${TESTMOD_KO_SRC}"
+        remove_test_kmods_from_tree
         if [ "${APPLY_PATCHES}" = "0" ]; then
-            warn "bpf_testmod.ko did not build in clean mode; continuing without module-backed selftests."
-        elif [ "${REBUILD_TESTMOD}" = "0" ] && [ "${KERNEL_BUILT_THIS_RUN}" = "0" ] && [ -f "${INSTALLED_TESTMOD}" ]; then
+            warn "BPF selftest modules did not build in clean mode; continuing without module-backed selftests."
+        elif [ "${REBUILD_TESTMOD}" = "0" ] && [ "${KERNEL_BUILT_THIS_RUN}" = "0" ] && all_test_kmods_installed; then
             KEEP_INSTALLED_TESTMOD=1
-            warn "bpf_testmod.ko rebuild failed, but the UML kernel was not rebuilt; keeping the installed module."
+            warn "BPF selftest module rebuild failed, but the UML kernel was not rebuilt; keeping installed modules."
         else
-            warn "bpf_testmod.ko build failed after core artifacts were installed."
+            warn "BPF selftest module build failed after core artifacts were installed."
         fi
     fi
 else
-    info "bpf_testmod.ko already available — skipping rebuild. (Use --rebuild-testmod to rebuild.)"
+    info "BPF selftest modules already available — skipping rebuild. (Use --rebuild-testmod to rebuild.)"
 fi
 
-if [ -f "${TESTMOD_KO_SRC}" ]; then
+if all_test_kmods_in_tree; then
     TESTMOD_AVAILABLE=1
     KEEP_INSTALLED_TESTMOD=0
-    info "bpf_testmod.ko: ${TESTMOD_KO_SRC} ($(ls -lh "${TESTMOD_KO_SRC}" | awk '{print $5}'))"
-elif [ "${KEEP_INSTALLED_TESTMOD}" = "1" ] && [ -f "${INSTALLED_TESTMOD}" ]; then
-    info "bpf_testmod.ko: reusing installed copy at ${INSTALLED_TESTMOD}"
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        module_path="${SELFTESTS_DIR}/test_kmods/${module}.ko"
+        info "${module}.ko: ${module_path} ($(ls -lh "${module_path}" | awk '{print $5}'))"
+    done
+elif [ "${KEEP_INSTALLED_TESTMOD}" = "1" ] && all_test_kmods_installed; then
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        info "${module}.ko: reusing installed copy at ${INSTALL_DIR}/${module}.ko"
+    done
 else
-    warn "bpf_testmod.ko is not available for the ${BUILD_FLAVOR} build."
+    warn "BPF selftest modules are not available for the ${BUILD_FLAVOR} build."
 fi
 
 # ------------------------------------------------------------------------------
@@ -985,7 +1056,7 @@ fi
 finalize_testmod_install
 
 if [ "${TESTMOD_BUILD_FAILED}" = "1" ] && [ "${APPLY_PATCHES}" = "1" ] && [ "${KEEP_INSTALLED_TESTMOD}" = "0" ]; then
-    echo "bpf_testmod.ko build failed"
+    echo "BPF selftest module build failed"
     exit 1
 fi
 
@@ -995,11 +1066,15 @@ info ""
 info "  UML kernel     : ${INSTALL_DIR}/linux"
 info "  veristat       : ${INSTALL_DIR}/veristat"
 if [ "${TESTMOD_AVAILABLE}" = "1" ]; then
-    info "  bpf_testmod.ko : ${INSTALL_DIR}/bpf_testmod.ko"
-elif [ "${KEEP_INSTALLED_TESTMOD}" = "1" ] && [ -f "${INSTALL_DIR}/bpf_testmod.ko" ]; then
-    info "  bpf_testmod.ko : ${INSTALL_DIR}/bpf_testmod.ko (reused)"
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        info "  ${module}.ko : ${INSTALL_DIR}/${module}.ko"
+    done
+elif [ "${KEEP_INSTALLED_TESTMOD}" = "1" ] && all_test_kmods_installed; then
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        info "  ${module}.ko : ${INSTALL_DIR}/${module}.ko (reused)"
+    done
 else
-    info "  bpf_testmod.ko : not available in ${BUILD_FLAVOR} build"
+    info "  BPF modules    : not available in ${BUILD_FLAVOR} build"
 fi
 info "  Selftests      : ${INSTALL_DIR}/selftests/ (${BPF_OBJ_COUNT} .bpf.o files)"
 info "  Versions       : ${INSTALL_DIR}/version.txt"
@@ -1026,11 +1101,11 @@ info ""
 info "  # Compare two versions of a program:"
 info "  uml-veristat -C old.bpf.o new.bpf.o"
 info ""
-info "  # Load bpf_testmod.ko before veristat (auto-detected from install dir):"
+info "  # Load BPF selftest modules before veristat (auto-detected from install dir):"
 info "  uml-veristat ${SELFTESTS_OUTPUT}/*.bpf.o"
 info ""
-info "  # Override module path explicitly:"
-info "  UML_MODULES=/path/to/bpf_testmod.ko uml-veristat ${SELFTESTS_OUTPUT}/*.bpf.o"
+info "  # Override module paths explicitly:"
+info "  UML_MODULES=\"/path/to/bpf_testmod.ko /path/to/bpf_test_modorder_x.ko /path/to/bpf_test_modorder_y.ko\" uml-veristat ${SELFTESTS_OUTPUT}/*.bpf.o"
 info ""
 info "  # Disable module loading:"
 info "  UML_MODULES=\"\" uml-veristat ${SELFTESTS_OUTPUT}/*.bpf.o"
@@ -1054,9 +1129,9 @@ if [ "${DO_PACKAGE}" = "1" ]; then
     cp "${UML_BINARY}"         "${PKG_DIR}/linux"
     cp "${VERISTAT_BIN}"       "${PKG_DIR}/veristat"
     chmod +x "${PKG_DIR}/linux" "${PKG_DIR}/veristat"
-    if [ -n "${TESTMOD_PACKAGE_SRC}" ] && [ -f "${TESTMOD_PACKAGE_SRC}" ]; then
-        cp "${TESTMOD_PACKAGE_SRC}" "${PKG_DIR}/bpf_testmod.ko"
-    fi
+    for module_src in "${TESTMOD_PACKAGE_SRCS[@]}"; do
+        [ -f "${module_src}" ] && cp "${module_src}" "${PKG_DIR}/"
+    done
 
     # --- Wrapper script ---
     cp "${SCRIPT_DIR}/uml-veristat" "${PKG_DIR}/uml-veristat"
@@ -1081,7 +1156,7 @@ bpf-next:     ${KERNEL_COMMIT_FULL}
 bpf-next tag: ${KERNEL_VERSION}
 LLVM:         ${LLVM_COMMIT_FULL}
 pahole:       ${PAHOLE_TAG}
-bpf_testmod:  $(if [ -n "${TESTMOD_PACKAGE_SRC}" ]; then echo available; else echo unavailable; fi)
+bpf_test_modules: $(if [ "${#TESTMOD_PACKAGE_SRCS[@]}" -gt 0 ]; then autoload_test_kmod_files; else echo unavailable; fi)
 VEOF
 
     # --- Package README ---
@@ -1098,7 +1173,7 @@ Contents
   uml-veristat    Wrapper script — the only file you need to run
   linux           UML kernel binary (bpf-next, BPF enabled)
   veristat        veristat binary (built from the same bpf-next tree)
-  bpf_testmod.ko  Optional BPF test module (included when it builds)
+  bpf_test*.ko    Optional BPF selftest modules (included when they build)
   kernel.config   Exact kernel config used for this build
   version.txt     Full provenance: git hashes, build date, host arch
   sha256sums      Integrity manifest for all included files
@@ -1124,11 +1199,13 @@ To rebuild from source: https://github.com/mykola-lysenko/bpf-uml-selftests
 REOF
 
     # --- SHA-256 integrity manifest ---
-    if [ -n "${TESTMOD_PACKAGE_SRC}" ] && [ -f "${TESTMOD_PACKAGE_SRC}" ]; then
-        (cd "${PKG_DIR}" && sha256sum linux veristat uml-veristat bpf_testmod.ko kernel.config > sha256sums)
-    else
-        (cd "${PKG_DIR}" && sha256sum linux veristat uml-veristat kernel.config > sha256sums)
-    fi
+    SHA256_INPUTS=(linux veristat uml-veristat kernel.config)
+    for module in "${AUTOLOAD_TEST_KMODS[@]}"; do
+        if [ -f "${PKG_DIR}/${module}.ko" ]; then
+            SHA256_INPUTS+=("${module}.ko")
+        fi
+    done
+    (cd "${PKG_DIR}" && sha256sum "${SHA256_INPUTS[@]}" > sha256sums)
 
     # --- Create tarball ---
     tar -czf "${PKG_TARBALL}" -C "${WORKDIR}" "${PKG_NAME}"

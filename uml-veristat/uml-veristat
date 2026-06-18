@@ -13,7 +13,7 @@
 #   VERISTAT     — path to the veristat binary
 #   UML_MODULES  — space-separated list of .ko files to insmod before veristat
 #                  Set to empty string "" to disable auto-loading of modules.
-#                  Example: UML_MODULES="/path/to/bpf_testmod.ko" uml-veristat ...
+#                  Example: UML_MODULES="/path/to/bpf_testmod.ko ..." uml-veristat ...
 #   UML_MEM      — UML guest memory (default: 512M)
 #   UML_VERBOSE  — set to 1 to see UML boot messages
 #
@@ -83,7 +83,7 @@ find_veristat() {
 #
 # Resolution order:
 #   1. UML_MODULES env var (if set, even to empty — disables auto-detection)
-#   2. ~/.local/share/uml-veristat/bpf_testmod.ko  (installed by build.sh)
+#   2. ~/.local/share/uml-veristat/*.ko  (installed by build.sh)
 #   3. Same directory as this script
 #   4. Nothing (proceed without loading any module)
 # ------------------------------------------------------------------------------
@@ -93,14 +93,25 @@ find_uml_modules() {
         echo "${UML_MODULES}"
         return 0
     fi
-    # Auto-detect bpf_testmod.ko from well-known locations.
-    local candidates=(
-        "${HOME}/.local/share/uml-veristat/bpf_testmod.ko"
-        "${SCRIPT_DIR}/bpf_testmod.ko"
+    # Auto-detect module-backed selftest prerequisites from well-known locations.
+    # Keep the module order aligned with the in-tree selftest loader.
+    local modules=(
+        "bpf_testmod.ko"
+        "bpf_test_modorder_x.ko"
+        "bpf_test_modorder_y.ko"
     )
     local found=()
-    for f in "${candidates[@]}"; do
-        [ -f "${f}" ] && found+=("${f}")
+    local module f
+    for module in "${modules[@]}"; do
+        for f in \
+            "${HOME}/.local/share/uml-veristat/${module}" \
+            "${SCRIPT_DIR}/${module}"
+        do
+            if [ -f "${f}" ]; then
+                found+=("${f}")
+                break
+            fi
+        done
     done
     echo "${found[*]:-}"
 }

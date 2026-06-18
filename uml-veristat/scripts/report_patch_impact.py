@@ -27,8 +27,17 @@ def case_env(install_dir: pathlib.Path) -> dict[str, str]:
         "UML_KERNEL": str(install_dir / "linux"),
         "VERISTAT": str(install_dir / "veristat"),
     }
-    module = install_dir / "bpf_testmod.ko"
-    env["UML_MODULES"] = str(module) if module.is_file() else ""
+    module_names = (
+        "bpf_testmod.ko",
+        "bpf_test_modorder_x.ko",
+        "bpf_test_modorder_y.ko",
+    )
+    modules = []
+    for name in module_names:
+        module = install_dir / name
+        if module.is_file():
+            modules.append(str(module))
+    env["UML_MODULES"] = " ".join(modules)
     return env
 
 

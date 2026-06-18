@@ -41,10 +41,6 @@
           "errno": -3,
           "reason": "SMC struct_ops and fentry targets are absent from the current UML kernel BTF, matching selftest skip conditions outside SMC-enabled kernels"
         },
-        "kfunc_module_order.bpf.o": {
-          "errno": -22,
-          "reason": "standalone load requires bpf_test_modorder_x/y modules, which the current UML veristat wrapper does not auto-load"
-        },
         "struct_ops_module.bpf.o": {
           "errno": -95,
           "reason": "selftest load mutates struct_ops maps and program autoload settings before loading; the raw object is not standalone-loadable"
@@ -98,10 +94,6 @@
         "bpf_smc.bpf.o": {
           "errno": -3,
           "reason": "SMC struct_ops and fentry targets are absent from the current UML kernel BTF, matching selftest skip conditions outside SMC-enabled kernels"
-        },
-        "kfunc_module_order.bpf.o": {
-          "errno": -22,
-          "reason": "standalone load requires bpf_test_modorder_x/y modules, which the current UML veristat wrapper does not auto-load"
         },
         "struct_ops_module.bpf.o": {
           "errno": -95,
