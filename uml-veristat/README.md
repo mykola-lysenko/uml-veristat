@@ -86,6 +86,22 @@ You can override the paths to the kernel and veristat binaries using environment
 - `UML_VERBOSE`: Set to `1` to see the full UML kernel boot log (useful for debugging kernel panics)
 - `UML_MODULES`: Space-separated kernel modules (`.ko`) to load before running veristat (defaults to the installed BPF selftest modules; set to `""` to disable)
 
+### Running `test_progs` in UML
+
+`uml-test-progs` runs the linked BPF selftests harness inside the same UML
+kernel. It is intended for runtime triage and baseline collection, while
+`uml-veristat` remains the standalone verifier tool.
+
+```bash
+./uml-test-progs --list
+./uml-test-progs --count
+./uml-test-progs -j1 --watchdog-timeout=60 -t arena
+```
+
+The runner mounts bpffs, cgroup2, and debugfs when available, brings loopback
+up, and exposes the BPF selftest modules from the selftests output directory so
+`test_progs` can load them through its normal helper path.
+
 ## Kernel Patches
 
 The `patches/` directory is split into two ordered folders:
@@ -94,23 +110,29 @@ The `patches/` directory is split into two ordered folders:
 - `patches/bpf-selftests-uml/`: BPF selftests patches and extra runtime
   `test_progs` support applied after the base stack.
 
-The current full stack contains 12 patches applied to the `bpf-next` kernel
+The current full stack contains 18 patches applied to the `bpf-next` kernel
 tree to enable full BPF verification on UML:
 
 | Patch | Description | Programs fixed |
 |-------|-------------|----------------|
 | 0001 | Add `__x64_sys_*` wrappers for BPF selftest compatibility | fentry/kprobe attach targets |
 | 0002 | Add hidden UML verification stubs for tracing, trace-printk helpers, stack trace, and gated LSM support | tracing/LSM types + maps, `bpf_printk()` users |
+| 0002b | Add `test_run` support to tracing and raw tracepoint verification stubs | runtime `test_progs` coverage for tracing/raw_tp stubs |
 | 0003 | Fix UML stub page alignment (`-Wl,-n` removal) | UML boot fix |
 | 0003b | Enable eBPF JIT support and default-on JIT for UML x86-64 | struct_ops + default guest JIT |
 | 0003c | Wire the native x86 BPF JIT backend into UML with runtime shims | real JIT capability hooks + clean verbose diagnostics |
+| 0003d | Support far BPF calls in the UML x86 JIT | kfunc/helper calls outside direct-call range |
 | 0004 | Fix `bpf_testmod.c` compilation on UML | bpf_testmod module |
 | 0005 | Tolerate duplicate base BTF candidates during split-BTF relocation | btf_relocate |
 | 0005b | Tolerate duplicate target type IDs during CO-RE relocation | `bpf_core_cast()` / `bpf_rdonly_cast()` users |
 | 0006 | Preallocate arena range-tree nodes in sleepable paths | arena map creation + arena globals copied through mmap |
+| 0006b | Use sleepable allocation for temporary arena page arrays | sleepable `bpf_arena_alloc_pages()` users |
 | 0007 | Add standalone defaults to benchmark map definitions | benchmark objects with harness-resized maps |
 | 0007b | Preserve zero `max_entries` for percpu cgroup storage in veristat | percpu cgroup storage maps |
 | 0008 | Cap veristat auto log size to avoid UML OOM | verbose log stability |
+| 0009 | Include `btf_ptr.h` in `bpf_iter_task_btf` | permissive `test_progs` build coverage |
+| 0010 | Keep `test_progs` running when the verification key cannot be registered | UML runtime selftest harness |
+| 0011 | Fix arena allocator globals for the ASM fallback path | `arena_htab_asm` |
 
 ### Patch-to-Selftest Correspondence
 
@@ -122,16 +144,22 @@ The table below shows the current practical correspondence.
 |-------|-----------|----------------------------------------------|
 | 0001 | x86-64 syscall wrapper BTF attach targets on UML | Syscall attach-target tests using `SYS_PREFIX`, such as `bpf_syscall_macro.c` and other `__x64_sys_*` kprobe/fentry/raw_tp cases |
 | 0002 | verification-only tracing/LSM/stack-trace support without `PERF_EVENTS`, plus `bpf_trace_printk()`/`bpf_trace_vprintk()` helper prototypes without `BPF_EVENTS` | Tracing-type and stack-trace users such as `pyperf*`, `strobemeta*`, `stacktrace_*`; `bpf_printk()` users such as `trace_printk.bpf.o`, `test_tunnel_kern.bpf.o`, and `arena_spin_lock.bpf.o`; plus LSM/storage-style cases like `local_storage`, `map_kptr`, `map_ptr_kern`, `test_get_xattr`, `test_map_in_map`, `verifier_vfs_reject` |
+| 0002b | `test_run` hooks for verification stubs | Runtime tests whose programs load through stubbed tracing/raw_tp program types, including `arena_atomics` |
 | 0003 | UML boot fix | Global prerequisite: all `uml-veristat` selftests depend on the UML guest booting at all |
 | 0003b | JIT enablement and default-on JIT | Struct-ops and JIT-gated program classes, including `struct_ops_*`, `tcp_ca_*`, and early kfunc-capable loads |
 | 0003c | Real x86 JIT capability hooks in UML, plus the UML runtime shims needed to link and use the backend for verification | Kfunc-using objects that used to fail with `JIT does not support calling kernel function`, such as `test_send_signal_kern.bpf.o`, `xfrm_info.bpf.o`, and parts of `test_tunnel_kern.bpf.o`; also suppresses `text_poke()` WARN noise in verbose-mode diagnostics |
+| 0003d | Indirect far-call lowering in the UML x86 JIT | Kfunc/helper calls whose host addresses are outside the x86 direct-call immediate range, including arena kfunc paths under UML |
 | 0004 | `bpf_testmod.ko` buildability on UML | Global prerequisite for `bpf_testmod`-backed selftests, including `struct_ops_module*`, `kfunc_call_*`, `iters_testmod*`, `kprobe_multi*`, and related module-BTF tests |
 | 0005 | Duplicate base-BTF candidate handling for split-BTF relocation | `bpf_testmod` module-BTF registration, which unblocks module-backed classes such as `struct_ops_*`, `kfunc_call_*`, `iters_testmod*`, `kprobe_multi*`, and `epilogue_*` |
 | 0005b | Duplicate target-type handling for CO-RE `BPF_CORE_TYPE_ID_TARGET` relocations | `bpf_rdonly_cast()` users such as `getpeername_unix_prog.bpf.o`, `getsockname_unix_prog.bpf.o`, and `sendmsg_unix_prog.bpf.o` when vmlinux BTF contains duplicate compatible `struct sockaddr_un` candidates |
 | 0006 | Sleepable arena range-tree bootstrap and user-fault split preallocation | Arena map creation for `arena_*`, `stream.bpf.o`, and `verifier_arena*` objects that previously failed at the first full-range insertion; arena globals copied through libbpf mmap, including `arena_htab.bpf.o`, `arena_spin_lock.bpf.o`, and `verifier_arena_globals1.bpf.o` |
+| 0006b | Sleepable temporary page-array allocation in `bpf_arena_alloc_pages()` | `arena_htab_llvm` and `arena_list` runtime paths that allocate arena pages from sleepable syscall tests |
 | 0007 | Standalone-loadable defaults for benchmark maps that are resized by their userspace harnesses | `bloom_filter_bench.bpf.o`, `bpf_hashmap_lookup.bpf.o`, and `htab_mem_bench.bpf.o` no longer require veristat-specific key/value-size guessing |
 | 0007b | `veristat` max-entries fixup exclusion for percpu cgroup storage | `map_ptr_kern.bpf.o`, `netcnt_prog.bpf.o`, `percpu_alloc_array.bpf.o`, `tailcall_cgrp_storage*.bpf.o`, and `verifier_cgroup_storage.bpf.o` avoid false `BPF_MAP_CREATE -EINVAL` failures |
 | 0008 | Stable verbose verifier logging under UML memory limits | Diagnostic coverage for failing objects in `-vl2` mode, especially `test_send_signal_kern.bpf.o`, `xfrm_info.bpf.o`, and `test_tunnel_kern.bpf.o` |
+| 0009 | Missing selftest header include | `bpf_iter_task_btf` host-side object build under UML-generated `vmlinux.h` |
+| 0010 | Non-fatal startup verification-key registration | `test_progs --list`, `--count`, and selected runtime subsets when asymmetric key instantiation is unavailable in UML |
+| 0011 | Arena globals and explicit casts for `BPF_ARENA_FORCE_ASM` | `arena_htab_asm` runtime load and execution |
 
 For upstreaming work, use the generated comparison report in
 [`docs/patch-impact.md`](/home/mykolal/bpf-uml-selftests/docs/patch-impact.md)

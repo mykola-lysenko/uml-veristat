@@ -891,11 +891,33 @@ CONFIG_ARGS=(
     --enable  DEBUG_INFO
     --enable  DEBUG_INFO_BTF
     --enable  PAHOLE_HAS_SPLIT_BTF
+    --enable  DEBUG_FS
     --enable  SECURITY
+    --enable  SECURITYFS
     --enable  KEYS
+    --enable  ASYMMETRIC_KEY_TYPE
+    --enable  ASYMMETRIC_PUBLIC_KEY_SUBTYPE
+    --enable  X509_CERTIFICATE_PARSER
+    --enable  PKCS7_MESSAGE_PARSER
+    --enable  SYSTEM_TRUSTED_KEYRING
+    --enable  SYSTEM_DATA_VERIFICATION
+    --set-str SYSTEM_TRUSTED_KEYS ""
     --enable  CRYPTO
+    --enable  CRYPTO_RSA
     --enable  XFRM_INTERFACE
     --enable  FS_VERITY
+    --enable  MEMCG
+    --enable  NET_SCHED
+    --enable  NET_SCH_INGRESS
+    --enable  NET_SCH_BPF
+    --enable  NET_CLS
+    --enable  NET_CLS_ACT
+    --enable  NET_CLS_BPF
+    --enable  NET_ACT_BPF
+    --enable  NET_ACT_MIRRED
+    --enable  DUMMY
+    --enable  TUN
+    --enable  VETH
     --enable  TCP_CONG_ADVANCED
     --enable  TCP_CONG_CUBIC
     --enable  TCP_CONG_DCTCP
@@ -1026,13 +1048,20 @@ info "bpftool: ${BPFTOOL_BIN}"
 #   CLANG / LLC  — our freshly built clang/llc
 #   TEST_KMODS=   — keep the host-arch selftests build from trying to build
 #                  kernel modules; bpf_testmod.ko is built separately for UML.
+#   SKIP_LLVM=1   — skip optional test_progs JIT disassembly support. Some
+#                  nightly/source LLVM installs have usable clang/llc but
+#                  incomplete llvm-config/libLLVM metadata, which otherwise
+#                  breaks the final test_progs link.
 VERISTAT_BIN="${SELFTESTS_OUTPUT}/veristat"
+TEST_PROGS_BIN="${SELFTESTS_OUTPUT}/test_progs"
 
-if [ ! -x "${VERISTAT_BIN}" ] || [ "${DO_UPDATE}" = "1" ] || [ "${REBUILD_SELFTESTS}" = "1" ]; then
+if [ ! -x "${VERISTAT_BIN}" ] || [ ! -x "${TEST_PROGS_BIN}" ] || \
+   [ "${DO_UPDATE}" = "1" ] || [ "${REBUILD_SELFTESTS}" = "1" ]; then
     info "Building all BPF selftests (veristat, test_progs, .bpf.o progs)..."
-    # -k: keep going on errors so that UML-incompatible or upstream-drifting
-    # selftests do not abort the whole build. We still install the successfully
-    # built corpus and validate it with scripts/report_coverage.py.
+    # -k plus BPF_STRICT_BUILD=0: keep going on errors so that
+    # UML-incompatible or upstream-drifting selftests do not abort the whole
+    # build. BPF_STRICT_BUILD=0 also lets the selftests Makefile skip failed BPF
+    # objects/tests and link a partial test_progs binary for runtime triage.
     SELFTESTS_MAKE_STATUS=0
     make -C "${SELFTESTS_DIR}" \
         OUTPUT="${SELFTESTS_OUTPUT}/" \
@@ -1043,6 +1072,8 @@ if [ ! -x "${VERISTAT_BIN}" ] || [ "${DO_UPDATE}" = "1" ] || [ "${REBUILD_SELFTE
         VMLINUX_BTF="${UML_BINARY}" \
         ARCH=x86_64 \
         TEST_KMODS= \
+        SKIP_LLVM=1 \
+        BPF_STRICT_BUILD=0 \
         -j"$(nproc)" \
         -k 2>&1 || SELFTESTS_MAKE_STATUS=$?
     if [ "${SELFTESTS_MAKE_STATUS}" -ne 0 ]; then
@@ -1055,6 +1086,11 @@ fi
 
 [ -x "${VERISTAT_BIN}" ] || { echo "veristat build failed"; exit 1; }
 info "veristat: ${VERISTAT_BIN}"
+if [ -x "${TEST_PROGS_BIN}" ]; then
+    info "test_progs: ${TEST_PROGS_BIN}"
+else
+    warn "test_progs was not linked; inspect the selftests build log for hard failures."
+fi
 
 BPF_OBJ_COUNT=$(find "${SELFTESTS_OUTPUT}" -name "*.bpf.o" 2>/dev/null | wc -l)
 info "BPF object files built: ${BPF_OBJ_COUNT} files in ${SELFTESTS_OUTPUT}/"

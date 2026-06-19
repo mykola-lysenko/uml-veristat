@@ -1,0 +1,327 @@
+#!/bin/bash
+# ==============================================================================
+# uml-test-progs — run BPF selftests test_progs inside the uml-veristat UML guest
+# ==============================================================================
+#
+# Usage:
+#   uml-test-progs [--gdb-wait] [test_progs-options...]
+#
+# Environment variables:
+#   UML_KERNEL       — path to the UML kernel binary
+#   TEST_PROGS       — path to the test_progs binary
+#   SELFTESTS_OUTPUT — directory containing test_progs and selftest data files
+#   UML_MODULES      — space-separated bpf_test*.ko paths; set to "" to disable
+#   UML_MEM          — UML guest memory (default: 2048M)
+#   UML_VERBOSE      — set to 1 to show UML boot messages
+#   UML_TEST_PROGS_PREFIX — optional shell command prefix for debugging
+# ==============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_DIR="${SCRIPT_DIR}/.build"
+
+print_usage() {
+    cat >&2 <<'EOF'
+Usage: uml-test-progs [--gdb-wait] [test_progs-options...]
+
+Examples:
+  uml-test-progs --list
+  uml-test-progs --count
+  uml-test-progs -j1 --watchdog-timeout=60 -t arena
+
+Wrapper options:
+  --gdb-wait   Boot UML, pause before running test_progs, print host GDB attach
+               instructions, and wait for Enter before continuing.
+EOF
+}
+
+find_uml_kernel() {
+    if [ -n "${UML_KERNEL:-}" ] && [ -x "${UML_KERNEL}" ]; then
+        echo "${UML_KERNEL}"; return 0
+    fi
+    if [ -x "${BUILD_DIR}/bpf-next/linux" ]; then
+        echo "${BUILD_DIR}/bpf-next/linux"; return 0
+    fi
+    local installed="${HOME}/.local/share/uml-veristat/linux"
+    if [ -x "${installed}" ]; then
+        echo "${installed}"; return 0
+    fi
+    if [ -x "${SCRIPT_DIR}/linux" ]; then
+        echo "${SCRIPT_DIR}/linux"; return 0
+    fi
+    return 1
+}
+
+find_test_progs() {
+    if [ -n "${TEST_PROGS:-}" ] && [ -x "${TEST_PROGS}" ]; then
+        echo "${TEST_PROGS}"; return 0
+    fi
+    if [ -x "${BUILD_DIR}/selftests-output/test_progs" ]; then
+        echo "${BUILD_DIR}/selftests-output/test_progs"; return 0
+    fi
+    local installed="${HOME}/.local/share/uml-veristat/selftests/test_progs"
+    if [ -x "${installed}" ]; then
+        echo "${installed}"; return 0
+    fi
+    if [ -x "${SCRIPT_DIR}/selftests/test_progs" ]; then
+        echo "${SCRIPT_DIR}/selftests/test_progs"; return 0
+    fi
+    return 1
+}
+
+find_uml_modules() {
+    if [ -v UML_MODULES ]; then
+        echo "${UML_MODULES}"
+        return 0
+    fi
+
+    local modules=(
+        "bpf_testmod.ko"
+        "bpf_test_modorder_x.ko"
+        "bpf_test_modorder_y.ko"
+    )
+    local roots=(
+        "${BUILD_DIR}/bpf-next/tools/testing/selftests/bpf/test_kmods"
+        "${HOME}/.local/share/uml-veristat"
+        "${SCRIPT_DIR}"
+    )
+    local found=()
+    local module root
+
+    for module in "${modules[@]}"; do
+        for root in "${roots[@]}"; do
+            if [ -f "${root}/${module}" ]; then
+                found+=("${root}/${module}")
+                break
+            fi
+        done
+    done
+
+    echo "${found[*]:-}"
+}
+
+GDB_WAIT=0
+TEST_PROGS_ARGS=()
+for arg in "$@"; do
+    case "${arg}" in
+        --gdb-wait) GDB_WAIT=1 ;;
+        -h|--help-wrapper) print_usage; exit 0 ;;
+        *) TEST_PROGS_ARGS+=("${arg}") ;;
+    esac
+done
+
+UML_BIN=$(find_uml_kernel) || {
+    echo "uml-test-progs: UML kernel not found." >&2
+    echo "  Run: ${SCRIPT_DIR}/build.sh" >&2
+    echo "  Or set: export UML_KERNEL=/path/to/linux" >&2
+    exit 1
+}
+
+TEST_PROGS_BIN=$(find_test_progs) || {
+    echo "uml-test-progs: test_progs binary not found." >&2
+    echo "  Run: ${SCRIPT_DIR}/build.sh --rebuild-selftests" >&2
+    echo "  Or set: export TEST_PROGS=/path/to/test_progs" >&2
+    exit 1
+}
+
+if [ -n "${SELFTESTS_OUTPUT:-}" ]; then
+    SELFTESTS_DIR="$(realpath "${SELFTESTS_OUTPUT}")"
+else
+    SELFTESTS_DIR="$(dirname "$(realpath "${TEST_PROGS_BIN}")")"
+fi
+
+[ -d "${SELFTESTS_DIR}" ] || {
+    echo "uml-test-progs: selftests output directory not found: ${SELFTESTS_DIR}" >&2
+    exit 1
+}
+
+MODULE_LIST=$(find_uml_modules)
+
+TMPDIR_UML=$(mktemp -d /tmp/uml-test-progs-XXXXXX)
+INIT_SCRIPT="${TMPDIR_UML}/init"
+RESULT_FILE="${TMPDIR_UML}/result"
+OUTPUT_FILE="${TMPDIR_UML}/output"
+READY_FILE="${TMPDIR_UML}/gdb-ready"
+GO_FILE="${TMPDIR_UML}/gdb-go"
+UML_PID=""
+CLEANED_UP=0
+OUTPUT_DUMPED=0
+
+cleanup() {
+    if [ "${CLEANED_UP}" = "1" ]; then
+        return
+    fi
+    CLEANED_UP=1
+    if [ -n "${UML_PID}" ] && kill -0 "${UML_PID}" 2>/dev/null; then
+        kill "${UML_PID}" 2>/dev/null || true
+        wait "${UML_PID}" 2>/dev/null || true
+    fi
+    rm -rf "${TMPDIR_UML}"
+}
+
+dump_output() {
+    if [ "${OUTPUT_DUMPED}" = "1" ]; then
+        return
+    fi
+    OUTPUT_DUMPED=1
+    [ -f "${OUTPUT_FILE}" ] && cat "${OUTPUT_FILE}" >&2
+}
+
+terminate() {
+    dump_output
+    cleanup
+    exit 124
+}
+
+trap cleanup EXIT
+trap terminate INT TERM
+
+TEST_PROGS_CMD="./test_progs"
+for a in "${TEST_PROGS_ARGS[@]}"; do
+    TEST_PROGS_CMD="${TEST_PROGS_CMD} $(printf '%q' "${a}")"
+done
+if [ -n "${UML_TEST_PROGS_PREFIX:-}" ]; then
+    TEST_PROGS_CMD="${UML_TEST_PROGS_PREFIX} ${TEST_PROGS_CMD}"
+fi
+
+MODULE_SETUP_CMDS=""
+if [ -n "${MODULE_LIST}" ]; then
+    for mod in ${MODULE_LIST}; do
+        module_name="$(basename "${mod}")"
+        MODULE_SETUP_CMDS="${MODULE_SETUP_CMDS}ln -sf ${mod} ${SELFTESTS_DIR}/${module_name}
+"
+    done
+fi
+
+cat > "${INIT_SCRIPT}" << INIT_EOF
+#!/bin/sh
+PATH=/usr/sbin:/usr/bin:/sbin:/bin:\$PATH
+
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sysfs /sys 2>/dev/null || true
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+
+mkdir -p /sys/fs/bpf /sys/fs/cgroup /sys/kernel/debug 2>/dev/null || true
+mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
+mount -t cgroup2 cgroup2 /sys/fs/cgroup 2>/dev/null || true
+mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+
+if command -v ip >/dev/null 2>&1; then
+    ip link set lo up 2>/dev/null || true
+fi
+
+${MODULE_SETUP_CMDS}
+if [ "${GDB_WAIT}" = "1" ]; then
+    : > ${READY_FILE}
+    while [ ! -f ${GO_FILE} ]; do
+        sleep 1
+    done
+fi
+
+cd ${SELFTESTS_DIR}
+if command -v stdbuf >/dev/null 2>&1; then
+    stdbuf -oL -eL ${TEST_PROGS_CMD} > ${OUTPUT_FILE} 2>&1
+else
+    ${TEST_PROGS_CMD} > ${OUTPUT_FILE} 2>&1
+fi
+rc=\$?
+if [ "\${rc}" -ne 0 ]; then
+    {
+        echo
+        echo "===== dmesg tail ====="
+        dmesg | tail -200
+    } >> ${OUTPUT_FILE} 2>&1 || true
+fi
+echo \${rc} > ${RESULT_FILE}
+sync
+
+halt -f 2>/dev/null || poweroff -f 2>/dev/null || echo o > /proc/sysrq-trigger
+INIT_EOF
+
+chmod +x "${INIT_SCRIPT}"
+
+MEM="${UML_MEM:-2048M}"
+VERBOSE="${UML_VERBOSE:-0}"
+GDB_MACROS="${SCRIPT_DIR}/../gdb_demo/verifier.gdb"
+UML_EXIT=0
+UML_ARGS=(
+    "mem=${MEM}"
+    "rootfstype=hostfs"
+    "hostfs=/"
+    "rw"
+    "init=${INIT_SCRIPT}"
+)
+
+if [ "${GDB_WAIT}" = "1" ]; then
+    UML_CONSOLE_ARGS=(quiet loglevel=0 con=null con0=null)
+    if [ "${VERBOSE}" = "1" ]; then
+        UML_CONSOLE_ARGS=(con=fd:2,fd:2 con0=fd:2,fd:2)
+    fi
+
+    "${UML_BIN}" "${UML_ARGS[@]}" "${UML_CONSOLE_ARGS[@]}" &
+    UML_PID=$!
+
+    for _ in $(seq 1 60); do
+        if [ -f "${READY_FILE}" ]; then
+            break
+        fi
+        if ! kill -0 "${UML_PID}" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    if [ ! -f "${READY_FILE}" ]; then
+        wait "${UML_PID}" || true
+        [ -f "${OUTPUT_FILE}" ] && cat "${OUTPUT_FILE}" >&2
+        echo "uml-test-progs: UML guest did not reach GDB wait state." >&2
+        exit 1
+    fi
+
+    echo "uml-test-progs: UML guest paused before running test_progs." >&2
+    echo "  UML PID: ${UML_PID}" >&2
+    echo "  Attach with:" >&2
+    echo "    gdb ${UML_BIN}" >&2
+    echo "    (gdb) attach ${UML_PID}" >&2
+    if [ -f "${GDB_MACROS}" ]; then
+        echo "    (gdb) source ${GDB_MACROS}" >&2
+    fi
+    echo "    (gdb) continue" >&2
+    echo "  Resume the guest after GDB is ready with:" >&2
+    echo "    touch ${GO_FILE}" >&2
+
+    while [ ! -f "${GO_FILE}" ]; do
+        if ! kill -0 "${UML_PID}" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    wait "${UML_PID}" 2>/dev/null || UML_EXIT=$?
+    UML_PID=""
+elif [ "${VERBOSE}" = "1" ]; then
+    "${UML_BIN}" "${UML_ARGS[@]}" con=fd:2,fd:2 con0=fd:2,fd:2 &
+    UML_PID=$!
+    wait "${UML_PID}" 2>/dev/null || UML_EXIT=$?
+    UML_PID=""
+else
+    (
+        "${UML_BIN}" "${UML_ARGS[@]}" \
+            quiet loglevel=0 \
+            con=null con0=null \
+            2>/dev/null
+    ) 2>/dev/null &
+    UML_PID=$!
+    wait "${UML_PID}" 2>/dev/null || UML_EXIT=$?
+    UML_PID=""
+fi
+
+if [ -f "${RESULT_FILE}" ]; then
+    [ -f "${OUTPUT_FILE}" ] && cat "${OUTPUT_FILE}"
+    exit "$(cat "${RESULT_FILE}")"
+else
+    [ -f "${OUTPUT_FILE}" ] && cat "${OUTPUT_FILE}" >&2
+    echo "uml-test-progs: UML guest did not complete normally (UML exit ${UML_EXIT})." >&2
+    exit 1
+fi

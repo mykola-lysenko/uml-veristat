@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Fri, 19 Jun 2026 11:25:00 -0700
+Subject: [PATCH] selftests/bpf: include btf_ptr.h in bpf_iter_task_btf
+
+bpf_iter_task_btf.c declares a local struct btf_ptr variable. Some
+generated vmlinux.h variants only forward-declare struct btf_ptr, which
+leaves the selftest with an incomplete type at compile time.
+
+Other BPF selftests that use struct btf_ptr include btf_ptr.h directly.
+Do the same here so the program does not depend on vmlinux.h carrying the
+full helper type definition.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ tools/testing/selftests/bpf/progs/bpf_iter_task_btf.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/testing/selftests/bpf/progs/bpf_iter_task_btf.c b/tools/testing/selftests/bpf/progs/bpf_iter_task_btf.c
+index ef2f7c8d9373..b1517a0d6a3e 100644
+--- a/tools/testing/selftests/bpf/progs/bpf_iter_task_btf.c
++++ b/tools/testing/selftests/bpf/progs/bpf_iter_task_btf.c
+@@ -1,6 +1,6 @@
+ // SPDX-License-Identifier: GPL-2.0
+ /* Copyright (c) 2020, Oracle and/or its affiliates. */
+-#include <vmlinux.h>
++#include "btf_ptr.h"
+ #include <bpf/bpf_helpers.h>
+ #include <bpf/bpf_core_read.h>
+ 
+-- 
+2.53.0
