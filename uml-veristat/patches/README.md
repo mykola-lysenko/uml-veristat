@@ -161,7 +161,8 @@ even though JIT is enabled.
 layout, text patching, mitigation, NOP, and per-cpu runtime symbols that UML
 does not provide. The original `uml-veristat` path only needed load-time
 verifier and JIT analysis. Runtime `test_progs` coverage adds stricter text
-patching requirements, which are handled later by patches 0012 and 0013.
+patching and syscall-dispatch requirements, which are handled later by patches
+0012, 0013, and 0014.
 
 UML's `text_poke()` implementation is also a warning stub. Without a UML-local
 copy path, final JIT image installation emits noisy stack traces during
@@ -432,6 +433,27 @@ left writable after the poke.
 wrapper targets. Together with the lower `uml-test-progs` default memory, this
 turns the focused `bloom_filter_map` probe from `-ERANGE`/`-EBUSY`/panic into a
 passing test.
+
+---
+
+## Patch 0014 — um/x86: route selected syscalls through BPF wrappers
+
+**File:** `arch/um/kernel/skas/syscall.c`
+
+**Problem:** The synthetic `__x64_sys_*` wrappers are BTF-visible and
+patchable after patches 0001 and 0012, but the UML syscall path still called
+the underlying `sys_*` table entries directly. fentry/fexit programs could
+attach to the wrappers successfully and still never execute.
+
+**Fix:** Route the five syscall numbers covered by the synthetic wrapper set
+through those wrappers before falling back to the normal UML syscall table
+path. The wrappers delegate to the same `sys_*` implementations, so syscall
+behavior remains unchanged while BPF trampoline attachments observe the wrapper
+entry.
+
+**Impact:** Makes runtime fentry/fexit tests that require the attached program
+to actually fire pass. Focused probes show `map_btf` and `user_ringbuf` pass
+after this change.
 
 ## Verification Notes
 

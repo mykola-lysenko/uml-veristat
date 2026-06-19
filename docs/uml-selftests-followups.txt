@@ -62,6 +62,15 @@ Current findings
     x86 signed 32-bit direct-call limit. With UML_MEM=1792M,
     bloom_filter_map now passes; with 2048M, BPF trampoline allocation lands
     just beyond the call range from UML kernel text.
+12. The synthetic __x64_sys_* wrappers also need to be in the actual UML
+    syscall dispatch path. Without that, fentry/fexit links can attach to the
+    wrappers but never execute. Routing the selected syscall numbers through the
+    wrappers makes map_btf and user_ringbuf pass.
+13. Enabling FTRACE_SYSCALLS and mounting tracefs creates
+    /sys/kernel/tracing/events/syscalls/* directories, but the event id files
+    remain absent because UML lacks PERF_EVENTS. Tracepoint auto-attach still
+    fails while reading the perf event ID, and raw tracepoint attach remains
+    blocked because CONFIG_BPF_EVENTS depends on PERF_EVENTS.
 
 Permissive build skip inventory
 -------------------------------
@@ -144,15 +153,14 @@ Current chunk results
    -EINVAL and raw_tp attach -ENOENT; core_reloc_raw passes. This is a runtime
    selftest issue, not a veristat-only map-definition issue.
 3. maps_core:
-   FAIL. Latest rebuilt run:
+   FAIL. Latest focused non-perf rerun after wrapper dispatch:
+   uml-veristat/.build/test-logs/chunk-maps-nonperf-wrapper-dispatch-20260619-142920.log.
+   map_btf and user_ringbuf now pass. map_in_map sleepable/update subtests pass,
+   while the kprobe subtests still fail with perf-backed attach -ENOENT.
+   Remaining non-perf failures are htab_update/reenter_update -EBUSY,
+   lru_bug helper rejection, and ringbuf/map_ptr light-skeleton load -EINVAL.
+   The older maps_core baseline before wrapper dispatch is:
    uml-veristat/.build/test-logs/chunk-maps_core-rebuilt-20260619-141307.log.
-   Summary is 5/35 passed, 0 skipped, 11 failed. bloom_filter_map, hashmap,
-   htab_reuse, map_create_failure, and queue_stack_map now pass. The old
-   "Target call ... is out of range" failures are gone with the wrapper/text-poke
-   fixes and UML_MEM=1792M. Remaining failures split into tracepoint/raw_tp or
-   kprobe attach -ENOENT, htab_update -EBUSY, lru_bug helper rejection,
-   map_btf non-executed program state, ringbuf/map_ptr load -EINVAL, and
-   user_ringbuf behavioral mismatches.
 4. cgroup_basic:
    FAIL. cg_storage_multi, cgroup_attach_override, cgroup_getset_retval,
    cgroup_skb_prog_run_direct_packet_access, and cgroup_storage_oob pass.
