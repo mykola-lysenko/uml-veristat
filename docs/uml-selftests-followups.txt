@@ -144,16 +144,15 @@ Current chunk results
    -EINVAL and raw_tp attach -ENOENT; core_reloc_raw passes. This is a runtime
    selftest issue, not a veristat-only map-definition issue.
 3. maps_core:
-   FAIL. hashmap, htab_reuse, map_create_failure, and queue_stack_map pass.
-   Many runtime map/ringbuf tests fail at load or attach. The dmesg tail shows
-   repeated "Target call ... is out of range" with UML_MEM=2048M. A focused
-   bloom_filter_map probe now passes with the wrapper/text-poke fixes and
-   UML_MEM=1792M, so rerun the full maps_core chunk with the lower default
-   memory before treating the old range failures as still active. A smaller
-   rerun of bloom_filter_map, map_ops, ringbuf, and user_ringbuf shows
-   bloom_filter_map now passing; remaining failures are tracepoint -ENOENT,
-   ringbuf load -EINVAL, and user_ringbuf behavioral mismatches rather than
-   BPF trampoline attach range failures.
+   FAIL. Latest rebuilt run:
+   uml-veristat/.build/test-logs/chunk-maps_core-rebuilt-20260619-141307.log.
+   Summary is 5/35 passed, 0 skipped, 11 failed. bloom_filter_map, hashmap,
+   htab_reuse, map_create_failure, and queue_stack_map now pass. The old
+   "Target call ... is out of range" failures are gone with the wrapper/text-poke
+   fixes and UML_MEM=1792M. Remaining failures split into tracepoint/raw_tp or
+   kprobe attach -ENOENT, htab_update -EBUSY, lru_bug helper rejection,
+   map_btf non-executed program state, ringbuf/map_ptr load -EINVAL, and
+   user_ringbuf behavioral mismatches.
 4. cgroup_basic:
    FAIL. cg_storage_multi, cgroup_attach_override, cgroup_getset_retval,
    cgroup_skb_prog_run_direct_packet_access, and cgroup_storage_oob pass.
