@@ -126,3 +126,32 @@ Chunked execution plan
    test names in the filename.
 5. Only after the chunks are understood, try a full run with a generous timeout
    and treat it as a coverage baseline, not as the first debugging signal.
+
+Current chunk results
+---------------------
+1. arena_smoke:
+   PASS. arena_atomics, arena_direct_value, arena_htab llvm+asm, arena_list,
+   arena_strsearch, and queue_stack_map pass. arena_spin_lock still skips all
+   three subtests.
+2. core_reloc:
+   FAIL. core_reloc and core_reloc_btfgen fail broadly with BPF_PROG_LOAD
+   -EINVAL and raw_tp attach -ENOENT; core_reloc_raw passes. This is a runtime
+   selftest issue, not a veristat-only map-definition issue.
+3. maps_core:
+   FAIL. hashmap, htab_reuse, map_create_failure, and queue_stack_map pass.
+   Many runtime map/ringbuf tests fail at load or attach. The dmesg tail shows
+   repeated "Target call ... is out of range", so the UML x86 JIT far-call
+   support is still incomplete for some code paths.
+4. cgroup_basic:
+   FAIL. cg_storage_multi, cgroup_attach_override, cgroup_getset_retval,
+   cgroup_skb_prog_run_direct_packet_access, and cgroup_storage_oob pass.
+   Failures split between attach -ENOENT, missing userland/kernel setup
+   (ip netns, net_cls, clone), and helper availability in cgrp_local_storage
+   sleepable paths.
+5. verifier_arena:
+   CRASH. verifier_arena/basic_alloc1 panics UML during
+   bpf_prog_test_run_syscall with a user-memory access at 0x1e0bae000.
+6. verifier_map_noarena:
+   PASS. verifier_cgroup_storage, verifier_map_in_map, verifier_map_ptr,
+   verifier_map_ptr_mixing, verifier_map_ret_val, and verifier_ringbuf pass
+   with only expected unprivileged skips.
