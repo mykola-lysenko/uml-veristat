@@ -71,6 +71,13 @@ Current findings
     remain absent because UML lacks PERF_EVENTS. Tracepoint auto-attach still
     fails while reading the perf event ID, and raw tracepoint attach remains
     blocked because CONFIG_BPF_EVENTS depends on PERF_EVENTS.
+14. Light-skeleton loader failures for ringbuf/map_ptr were caused by
+    BPF_PROG_TYPE_SYSCALL loader programs calling bpf_probe_read_kernel()
+    while UML builds without BPF_EVENTS. Adding probe-read helper
+    implementations to the UML verification stubs makes all ringbuf subtests
+    pass. map_ptr now loads and runs, and its remaining failure is direct
+    struct bpf_ringbuf CO-RE field-offset access: bpf_ringbuf_query() reports
+    producer_pos=136, but direct rb->producer_pos still reads zero.
 
 Permissive build skip inventory
 -------------------------------
@@ -127,6 +134,9 @@ Open questions
 1. RESOLVED: build full test_progs by default in build.sh using BPF_STRICT_BUILD=0.
 2. Should selftest-run artifacts be committed as a baseline, uploaded from CI, or both?
 3. Which passing subsets are valuable enough to become regular CI, given runtime and UML limitations?
+4. What is the right fix for map_ptr direct struct bpf_ringbuf field access:
+   a light-skeleton CO-RE relocation issue, a UML BTF/type-selection issue, or
+   a selftest assumption that should avoid direct internal ringbuf fields?
 
 Chunked execution plan
 ----------------------
@@ -158,7 +168,9 @@ Current chunk results
    map_btf and user_ringbuf now pass. map_in_map sleepable/update subtests pass,
    while the kprobe subtests still fail with perf-backed attach -ENOENT.
    Remaining non-perf failures are htab_update/reenter_update -EBUSY,
-   lru_bug helper rejection, and ringbuf/map_ptr light-skeleton load -EINVAL.
+   lru_bug helper rejection, and map_ptr direct ringbuf-map field access.
+   ringbuf light-skeleton load/runtime is fixed by patch 0015; latest focused
+   log is uml-veristat/.build/test-logs/chunk-helper-clean-focused-latest.log.
    The older maps_core baseline before wrapper dispatch is:
    uml-veristat/.build/test-logs/chunk-maps_core-rebuilt-20260619-141307.log.
 4. cgroup_basic:

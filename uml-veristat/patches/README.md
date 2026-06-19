@@ -455,6 +455,38 @@ entry.
 to actually fire pass. Focused probes show `map_btf` and `user_ringbuf` pass
 after this change.
 
+---
+
+## Patch 0015 — bpf: add probe read helpers to UML verification stubs
+
+**File:** `kernel/bpf/bpf_verification_stubs.c`
+
+**Problem:** UML verification kernels intentionally build without
+`CONFIG_BPF_EVENTS`, so they do not link `kernel/trace/bpf_trace.o`. That
+leaves the weak `bpf_probe_read_kernel*` helper prototypes in
+`kernel/bpf/helpers.c` without function pointers.
+
+`BPF_PROG_TYPE_SYSCALL` delegates these helpers to the tracing helper
+prototype path. Generated light-skeleton loader programs use
+`bpf_probe_read_kernel()` to read their loader context before they create and
+load the real BPF object. Without the helper implementation, the loader program
+itself is rejected with:
+
+```text
+program of this type cannot use helper bpf_probe_read_kernel#113
+```
+
+**Fix:** Provide `bpf_probe_read_kernel()` and
+`bpf_probe_read_kernel_str()` implementations from the UML verification-stub
+object, mirroring the helper prototypes normally supplied by
+`kernel/trace/bpf_trace.c`.
+
+**Impact:** Allows light-skeleton syscall loader programs to execute in the
+no-`BPF_EVENTS` UML configuration. Focused runtime probes show all five
+`ringbuf` subtests pass after this change. `map_ptr` also gets past lskel load
+and test-run setup; its remaining failure is a separate CO-RE relocation issue
+for direct `struct bpf_ringbuf` field-offset access.
+
 ## Verification Notes
 
 `uml-veristat` is validating two things at once:

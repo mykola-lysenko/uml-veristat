@@ -110,7 +110,7 @@ The `patches/` directory is split into two ordered folders:
 - `patches/bpf-selftests-uml/`: BPF selftests patches and extra runtime
   `test_progs` support applied after the base stack.
 
-The current full stack contains 21 patches applied to the `bpf-next` kernel
+The current full stack contains 22 patches applied to the `bpf-next` kernel
 tree to enable full BPF verification on UML:
 
 | Patch | Description | Programs fixed |
@@ -136,6 +136,7 @@ tree to enable full BPF verification on UML:
 | 0012 | Make synthetic syscall wrappers patchable | fentry/fexit attachment to `__x64_sys_*` wrappers |
 | 0013 | Make BPF text pokes writable under UML | runtime BPF trampoline attach/detach |
 | 0014 | Route selected syscalls through synthetic wrappers | runtime fentry/fexit execution on `__x64_sys_*` wrappers |
+| 0015 | Add probe-read helpers to UML verification stubs | light-skeleton BPF syscall loader programs |
 
 ### Patch-to-Selftest Correspondence
 
@@ -166,6 +167,7 @@ The table below shows the current practical correspondence.
 | 0012 | Patchable 5-byte entries for synthetic syscall wrappers | fentry/fexit programs targeting UML-provided `__x64_sys_*` symbols, including `bloom_filter_map` |
 | 0013 | Writable UML BPF text-poke shim | BPF trampoline attachment to synthetic wrapper targets; removes `-EBUSY`/panic after the trampoline is within direct-call range |
 | 0014 | Runtime dispatch through selected synthetic syscall wrappers | fentry/fexit programs that must actually execute on syscall entry, including `map_btf` and `user_ringbuf` |
+| 0015 | Kernel probe-read helpers in the no-`BPF_EVENTS` UML verification-stub config | Generated light-skeleton loader programs for runtime tests such as `ringbuf`; these loader programs use `BPF_PROG_TYPE_SYSCALL` and call `bpf_probe_read_kernel()` before creating/loading the real object |
 
 For upstreaming work, use the generated comparison report in
 [`docs/patch-impact.md`](/home/mykolal/bpf-uml-selftests/docs/patch-impact.md)
