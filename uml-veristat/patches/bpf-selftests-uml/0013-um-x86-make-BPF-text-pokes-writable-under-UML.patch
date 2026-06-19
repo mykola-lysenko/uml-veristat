@@ -14,20 +14,21 @@ entry slot.
 
 Signed-off-by: Mykola Lysenko <mykolal@meta.com>
 ---
- arch/x86/net/bpf_jit_comp.c | 33 ++++++++++++++++++++++++++++++---
- 1 file changed, 30 insertions(+), 3 deletions(-)
+ arch/x86/net/bpf_jit_comp.c | 31 ++++++++++++++++++++++++++---
+ 1 file changed, 28 insertions(+), 3 deletions(-)
 
 diff --git a/arch/x86/net/bpf_jit_comp.c b/arch/x86/net/bpf_jit_comp.c
 index 5ad6dbc01d5d..2ec24d084204 100644
 --- a/arch/x86/net/bpf_jit_comp.c
 +++ b/arch/x86/net/bpf_jit_comp.c
-@@ -23,13 +23,17 @@
+@@ -23,16 +23,18 @@
  #include <asm/unwind.h>
  #include <asm/vsyscall.h>
  #include <asm/cfi.h>
-+#ifdef CONFIG_UML
+ #ifdef CONFIG_UML
 +#include <os.h>
-+#endif
+ #include <as-layout.h>
+ #endif
  
  #ifdef CONFIG_UML
  static const unsigned char x86_nop1[] = { BYTES_NOP1 };
@@ -86,4 +87,3 @@ index 5ad6dbc01d5d..2ec24d084204 100644
  
 -- 
 2.53.0-Meta
-

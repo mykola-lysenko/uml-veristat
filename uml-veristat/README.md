@@ -110,7 +110,7 @@ The `patches/` directory is split into two ordered folders:
 - `patches/bpf-selftests-uml/`: BPF selftests patches and extra runtime
   `test_progs` support applied after the base stack.
 
-The current full stack contains 22 patches applied to the `bpf-next` kernel
+The current full stack contains 23 patches applied to the `bpf-next` kernel
 tree to enable full BPF verification on UML:
 
 | Patch | Description | Programs fixed |
@@ -131,6 +131,7 @@ tree to enable full BPF verification on UML:
 | 0007b | Preserve zero `max_entries` for percpu cgroup storage in veristat | percpu cgroup storage maps |
 | 0008 | Cap veristat auto log size to avoid UML OOM | verbose log stability |
 | 0009 | Include `btf_ptr.h` in `bpf_iter_task_btf` | permissive `test_progs` build coverage |
+| 0009b | Validate BPF probe-read memory against UML ranges | runtime probe-read safety for UML verification stubs |
 | 0010 | Keep `test_progs` running when the verification key cannot be registered | UML runtime selftest harness |
 | 0011 | Fix arena allocator globals for the ASM fallback path | `arena_htab_asm` |
 | 0012 | Make synthetic syscall wrappers patchable | fentry/fexit attachment to `__x64_sys_*` wrappers |
@@ -162,6 +163,7 @@ The table below shows the current practical correspondence.
 | 0007b | `veristat` max-entries fixup exclusion for percpu cgroup storage | `map_ptr_kern.bpf.o`, `netcnt_prog.bpf.o`, `percpu_alloc_array.bpf.o`, `tailcall_cgrp_storage*.bpf.o`, and `verifier_cgroup_storage.bpf.o` avoid false `BPF_MAP_CREATE -EINVAL` failures |
 | 0008 | Stable verbose verifier logging under UML memory limits | Diagnostic coverage for failing objects in `-vl2` mode, especially `test_send_signal_kern.bpf.o`, `xfrm_info.bpf.o`, and `test_tunnel_kern.bpf.o` |
 | 0009 | Missing selftest header include | `bpf_iter_task_btf` host-side object build under UML-generated `vmlinux.h` |
+| 0009b | UML-aware probe-read memory validation | Runtime tests whose light-skeleton loader programs probe guest memory ranges before creating/loading the real object |
 | 0010 | Non-fatal startup verification-key registration | `test_progs --list`, `--count`, and selected runtime subsets when asymmetric key instantiation is unavailable in UML |
 | 0011 | Arena globals and explicit casts for `BPF_ARENA_FORCE_ASM` | `arena_htab_asm` runtime load and execution |
 | 0012 | Patchable 5-byte entries for synthetic syscall wrappers | fentry/fexit programs targeting UML-provided `__x64_sys_*` symbols, including `bloom_filter_map` |
