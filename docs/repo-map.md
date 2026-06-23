@@ -11,6 +11,8 @@ supporting infrastructure and reference material.
   - `build.sh`
   - `uml-veristat`
   - `patches/`
+    - `uml-veristat/`
+    - `bpf-selftests-uml/`
 
 - `selftests/`
   Legacy UML selftests work, preserved and still runnable. Contains:

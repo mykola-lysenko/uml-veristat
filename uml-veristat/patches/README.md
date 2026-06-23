@@ -4,6 +4,20 @@ These patches are applied to the bpf-next kernel tree after checkout to enable
 BPF verification on User Mode Linux (UML). They are applied by `build.sh`
 automatically using `git am` (idempotent: already-applied patches are skipped).
 
+The stack is split by purpose:
+
+- `uml-veristat/`: base stack for building and running `uml-veristat` on UML.
+  This includes shared UML verifier/JIT support and generic kernel-side BPF
+  fixes.
+- `bpf-selftests-uml/`: BPF selftests patches and extra runtime `test_progs`
+  support applied after the base stack. Put new patches here when they touch
+  `tools/testing/selftests/bpf` or are only needed for runtime BPF selftests
+  on UML.
+
+`build.sh` applies both folders by default, in that order. The split is
+organizational; the full package and CI path still uses both folders unless
+`--clean` or `--skip-patches` is requested.
+
 ## Patches
 
 ### 0001 — `um/x86: add __x64_sys_* wrappers for BPF selftest compatibility`

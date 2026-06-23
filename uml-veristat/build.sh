@@ -752,20 +752,57 @@ info "bpf-next: ${KERNEL_COMMIT}  (${KERNEL_VERSION})"
 # ------------------------------------------------------------------------------
 # Apply UML BPF compatibility patches
 # ------------------------------------------------------------------------------
-# Patches are stored in patches/ next to this script, in git format-patch
-# format. They are applied with 'git am' after kernel checkout.
+# Patches are stored in ordered subdirectories under patches/ next to this
+# script, in git format-patch format. They are applied with 'git am' after
+# kernel checkout.
 #
 # We intentionally detect "already applied" by checking whether the patch
 # reverses cleanly against the current tree, not by matching commit subjects.
 # Patch subjects changed over time as patches were merged/squashed, and subject
 # matching causes stale build trees to mis-detect partially updated patch sets.
 PATCHES_DIR="${SCRIPT_DIR}/patches"
+PATCH_STACK_DIRS=(
+    "${PATCHES_DIR}/uml-veristat"
+    "${PATCHES_DIR}/bpf-selftests-uml"
+)
+
+collect_patch_files() {
+    PATCH_FILES=()
+
+    local dir patch
+    if [ -d "${PATCHES_DIR}/uml-veristat" ] || [ -d "${PATCHES_DIR}/bpf-selftests-uml" ]; then
+        for dir in "${PATCH_STACK_DIRS[@]}"; do
+            [ -d "${dir}" ] || continue
+            for patch in "${dir}"/*.patch; do
+                [ -f "${patch}" ] || continue
+                PATCH_FILES+=("${patch}")
+            done
+        done
+    else
+        for patch in "${PATCHES_DIR}"/*.patch; do
+            [ -f "${patch}" ] || continue
+            PATCH_FILES+=("${patch}")
+        done
+    fi
+}
+
+patch_rel_path() {
+    local patch="$1"
+    local rel="${patch#${PATCHES_DIR}/}"
+
+    if [ "${rel}" = "${patch}" ]; then
+        rel="${patch##*/}"
+    fi
+    printf '%s\n' "${rel}"
+}
+
 should_skip_patch() {
     local patch_name="$1"
+    local patch_base="${patch_name##*/}"
     local skip
     for skip in "${SKIP_PATCHES[@]}"; do
         [ -n "${skip}" ] || continue
-        if [[ "${patch_name}" == "${skip}"* ]]; then
+        if [[ "${patch_name}" == "${skip}"* || "${patch_base}" == "${skip}"* ]]; then
             return 0
         fi
     done
@@ -796,18 +833,23 @@ if [ -d "${PATCHES_DIR}" ]; then
         git -C "${LINUX_DIR}" config user.email "uml-veristat@build" 2>/dev/null || true
         git -C "${LINUX_DIR}" config user.name  "uml-veristat build"  2>/dev/null || true
 
-        for patch in "${PATCHES_DIR}"/*.patch; do
-            [ -f "${patch}" ] || continue
-            if should_skip_patch "${patch##*/}"; then
-                info "Skipping patch by request: ${patch##*/}"
+        collect_patch_files
+        if [ "${#PATCH_FILES[@]}" -eq 0 ]; then
+            warn "No patch files found in ${PATCHES_DIR}"
+        fi
+
+        for patch in "${PATCH_FILES[@]}"; do
+            patch_rel="$(patch_rel_path "${patch}")"
+            if should_skip_patch "${patch_rel}"; then
+                info "Skipping patch by request: ${patch_rel}"
                 continue
             fi
             if git -C "${LINUX_DIR}" apply --check --reverse "${patch}" >/dev/null 2>&1; then
-                info "Patch already applied — skipping: ${patch##*/}"
+                info "Patch already applied — skipping: ${patch_rel}"
             else
-                info "Applying patch: ${patch##*/}"
+                info "Applying patch: ${patch_rel}"
                 if ! git -C "${LINUX_DIR}" am --whitespace=nowarn "${patch}"; then
-                    warn "Plain git am failed for ${patch##*/}; retrying with --3way"
+                    warn "Plain git am failed for ${patch_rel}; retrying with --3way"
                     git -C "${LINUX_DIR}" am --abort >/dev/null 2>&1 || true
                     git -C "${LINUX_DIR}" am --3way --whitespace=nowarn "${patch}"
                 fi

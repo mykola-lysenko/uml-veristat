@@ -88,7 +88,14 @@ You can override the paths to the kernel and veristat binaries using environment
 
 ## Kernel Patches
 
-The `patches/` directory contains 12 patches applied to the `bpf-next` kernel tree to enable full BPF verification on UML:
+The `patches/` directory is split into two ordered folders:
+
+- `patches/uml-veristat/`: the base UML veristat stack.
+- `patches/bpf-selftests-uml/`: BPF selftests patches and extra runtime
+  `test_progs` support applied after the base stack.
+
+The current full stack contains 12 patches applied to the `bpf-next` kernel
+tree to enable full BPF verification on UML:
 
 | Patch | Description | Programs fixed |
 |-------|-------------|----------------|
