@@ -33,34 +33,26 @@ Signed-off-by: Mykola Lysenko <mykolal@meta.com>
  include/linux/perf_event.h          |  17 +-
  kernel/bpf/Kconfig                  |  29 ++
  kernel/bpf/Makefile                 |   6 +-
- kernel/bpf/bpf_verification_stubs.c | 488 ++++++++++++++++++++++++++++
+ kernel/bpf/bpf_verification_stubs.c | 490 ++++++++++++++++++++++++++++
  kernel/bpf/stackmap.c               |   2 +
- 7 files changed, 547 insertions(+), 11 deletions(-)
+ 7 files changed, 549 insertions(+), 11 deletions(-)
  create mode 100644 kernel/bpf/bpf_verification_stubs.c
 
 diff --git a/include/linux/bpf_lsm.h b/include/linux/bpf_lsm.h
 index 143775a27..627c4ab66 100644
 --- a/include/linux/bpf_lsm.h
 +++ b/include/linux/bpf_lsm.h
-@@ -12,7 +12,7 @@
- #include <linux/bpf_verifier.h>
- #include <linux/lsm_hooks.h>
- 
+@@ -15,3 +15,3 @@
 -#ifdef CONFIG_BPF_LSM
 +#if defined(CONFIG_BPF_LSM) || defined(CONFIG_BPF_LSM_VERIFICATION_STUBS)
  
- #define LSM_HOOK(RET, DEFAULT, NAME, ...) \
- 	RET bpf_lsm_##NAME(__VA_ARGS__);
-@@ -54,7 +54,7 @@ int bpf_remove_dentry_xattr_locked(struct dentry *dentry, const char *name__str)
- bool bpf_lsm_has_d_inode_locked(const struct bpf_prog *prog);
- bool bpf_lsm_hook_returns_errno(u32 btf_id);
- 
+ extern bool bpf_lsm_initialized __ro_after_init;
+@@ -59,3 +59,3 @@
 -#else /* !CONFIG_BPF_LSM */
 +#else /* !CONFIG_BPF_LSM && !CONFIG_BPF_LSM_VERIFICATION_STUBS */
  
- static inline bool bpf_lsm_is_sleepable_hook(u32 btf_id)
- {
-@@ -110,6 +110,6 @@ static inline bool bpf_lsm_hook_returns_errno(u32 btf_id)
+ #define bpf_lsm_initialized false
+@@ -113,5 +113,5 @@ static inline bool bpf_lsm_hook_returns_errno(u32 btf_id)
  {
  	return true;
  }
@@ -211,7 +203,7 @@ new file mode 100644
 index 000000000..4dabb53d3
 --- /dev/null
 +++ b/kernel/bpf/bpf_verification_stubs.c
-@@ -0,0 +1,488 @@
+@@ -0,0 +1,490 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * BPF program type stubs for verification-only kernels (e.g. UML)
@@ -604,6 +596,8 @@ index 000000000..4dabb53d3
 +
 +struct lsm_blob_sizes bpf_lsm_blob_sizes __ro_after_init;
 +
++bool bpf_lsm_initialized __ro_after_init = true;
++
 +void bpf_lsm_find_cgroup_shim(const struct bpf_prog *prog, bpf_func_t *bpf_func)
 +{
 +}
@@ -722,4 +716,3 @@ index 77ba03216..6d1349690 100644
  static void *stack_map_lookup_elem(struct bpf_map *map, void *key)
 -- 
 2.53.0-Meta
-
