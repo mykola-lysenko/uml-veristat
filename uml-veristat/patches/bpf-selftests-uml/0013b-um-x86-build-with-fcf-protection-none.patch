@@ -1,0 +1,45 @@
+From e32e489f89ca1d538c171ec2cda46b66354f9d1d Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Fri, 10 Jul 2026 14:37:07 -0700
+Subject: [PATCH] um/x86: build with -fcf-protection=none
+
+Native x86 kernel builds pass -fcf-protection=none explicitly unless
+CONFIG_X86_KERNEL_IBT re-enables branch protection. The UML makefiles
+never set the flag, so toolchains that default to -fcf-protection=full
+(e.g. Ubuntu and Fedora host compilers) prepend a 4-byte endbr64 to
+every kernel function.
+
+UML cannot use CET, so the endbr64 markers are dead weight, and they
+break BPF trampoline attachment: the patchable_function_entry(5, 0)
+NOP slot of the synthetic __x64_sys_* wrappers is displaced from
+function entry, so BPF text-poke byte comparison finds endbr64 where
+it expects NOPs and attaching fentry/fexit programs fails with -EBUSY
+on hosts whose compiler enables CET by default.
+
+Pass -fcf-protection=none for UML builds, matching native x86.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ arch/x86/Makefile.um | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/x86/Makefile.um b/arch/x86/Makefile.um
+index f65289362..9a574ffd8 100644
+--- a/arch/x86/Makefile.um
++++ b/arch/x86/Makefile.um
+@@ -2,6 +2,12 @@
+ core-y += arch/x86/crypto/
+ core-y += arch/x86/net/
+ 
++# Match arch/x86: CET is not supported on UML. Compilers that default to
++# -fcf-protection=full prepend endbr64 to every function, which displaces
++# the patchable_function_entry() slot that BPF text poking expects at
++# function entry.
++KBUILD_CFLAGS += $(call cc-option,-fcf-protection=none)
++
+ #
+ # Disable SSE and other FP/SIMD instructions to match normal x86
+ # This is required to work around issues in older LLVM versions, but breaks
+-- 
+2.43.0
+
