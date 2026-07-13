@@ -170,6 +170,19 @@ Current findings
     files / 2976 verified programs (April baseline: 2282). Manifest
     additions: test_usdt_multispec failed-to-open -2 (USDT spec needs
     uprobes), skipped_files 3.
+24. (2026-07-12) First complete chunked test_progs baselines exist
+    (checklist items 6-7 done): scripts/run_test_chunks.py partitions
+    the full suite into 25-test chunks, survives guest crashes, and
+    emits per-chunk logs plus parsed summaries; a full sweep takes
+    under an hour. Pre-PT_REGS-fix: 722 tests, 370 OK / 126 FAIL /
+    73 SKIP / 154 NORESULT. Post-fix: 736 tests, 347 OK / 115 FAIL /
+    70 SKIP / 204 NORESULT — the newly compiled kprobe/uprobe/usdt
+    runtime tests include fresh guest-crashers whose chunks shadow
+    neighbors into NORESULT, so OK currently understates coverage.
+    14 crashed chunks yield 13 killer suspects (see
+    reports/selftests-baseline/2026-07-12-520d7d794.md), each a
+    candidate kernel-bug hunt in the arena-crash tradition. Baseline
+    artifacts live under reports/selftests-baseline/.
 21. The verifier_arena_large hang was an infinite fault loop in segv()'s
     vmalloc-range branch: kernel faults in [start_vm, end_vm) sync TLBs and
     retry unconditionally, so a deliberately faulting BPF load on an
