@@ -982,7 +982,30 @@ CONFIG_ARGS=(
     # the key's X.509 signature instantiates pkcs1(rsa,sha256), which needs
     # the sha256 shash in addition to RSA and the crypto manager.
     --enable  CRYPTO_SHA256
+    # XFRM_INTERFACE alone was silently dropped by olddefconfig for lack of
+    # its XFRM_USER dependency; enable the chain explicitly so the xfrm BPF
+    # kfunc types (bpf_xfrm_state etc.) actually land in the kernel BTF.
+    --enable  XFRM
+    --enable  XFRM_ALGO
+    --enable  XFRM_USER
     --enable  XFRM_INTERFACE
+    # Selftest families that only compile when their subsystem types exist
+    # in vmlinux.h: mptcp_sock/mptcp_subflow, lwt_misc/test_lwt_ip_encap,
+    # test_bpf_nf (nf_conn.mark), and test_tunnel_kern (tunnel drivers).
+    --enable  MPTCP
+    --enable  MPTCP_IPV6
+    --enable  LWTUNNEL
+    --enable  LWTUNNEL_BPF
+    --enable  NF_CONNTRACK_MARK
+    --enable  NF_CONNTRACK_EVENTS
+    --enable  NF_NAT
+    --enable  NET_IPIP
+    --enable  NET_IPGRE
+    --enable  NET_IPGRE_DEMUX
+    --enable  VXLAN
+    --enable  GENEVE
+    --enable  IPV6_GRE
+    --enable  IPV6_TUNNEL
     --enable  FS_VERITY
     --enable  MEMCG
     --enable  NET_SCHED
