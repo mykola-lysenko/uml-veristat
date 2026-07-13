@@ -142,6 +142,20 @@ Current findings
     after validating identical corpus and chunk results without them.
     Remaining structural gaps: kprobes, uprobes, ftrace function
     tracing (fentry to arbitrary functions), and hardware perf.
+22. (2026-07-12) Tier-3 kernel config audit: six selftest families that
+    failed to compile against UML vmlinux.h were config gaps, not
+    capability gaps. MPTCP/MPTCP_IPV6 recover mptcp_sock and
+    mptcp_subflow; LWTUNNEL/LWTUNNEL_BPF recover lwt_misc and
+    test_lwt_ip_encap; NF_CONNTRACK_MARK recovers test_bpf_nf
+    (nf_conn.mark field); the XFRM chain (XFRM/XFRM_ALGO/XFRM_USER)
+    recovers test_tunnel_kern (bpf_xfrm_state kfunc types) — and exposed
+    that the existing XFRM_INTERFACE enable had been silently dropped by
+    olddefconfig for years for lack of XFRM_USER, which also fixes
+    xfrm_info.bpf.o corpus processing. Compile-skip inventory: ~57
+    (June) -> 38 (after tier-2's real BPF_EVENTS) -> 32. The corpus
+    grows to 2835 verified programs. The remaining 32 skips are
+    structural: uprobes/usdt, UML pt_regs layout, and dmabuf hardware
+    (see the refreshed inventory below).
 21. The verifier_arena_large hang was an infinite fault loop in segv()'s
     vmalloc-range branch: kernel faults in [start_vm, end_vm) sync TLBs and
     retry unconditionally, so a deliberately faulting BPF load on an
@@ -156,35 +170,24 @@ Current findings
 
 Permissive build skip inventory
 -------------------------------
-Skipped BPF objects are mostly in these buckets:
-1. UML pt_regs layout mismatch for PT_REGS_* users:
-   bpf_iter_tasks.bpf.o, bpf_syscall_macro.bpf.o, loop1.bpf.o,
-   loop2.bpf.o, loop3.bpf.o, lsm.bpf.o, rcu_read_lock.bpf.o,
-   test_perf_skip.bpf.o, test_sleepable_tracepoints.bpf.o,
-   test_uprobe.bpf.o, test_uprobe_autoattach.bpf.o, test_vmlinux.bpf.o,
+Skipped BPF objects (32 as of 2026-07-12, bpf-next 520d7d794 with the
+full stack and tier-3 configs; regenerate with a comm(1) diff of
+progs/*.c names vs .build/selftests-output/*.bpf.o):
+1. uprobe/usdt support missing on UML (11):
+   test_probe_user.bpf.o, test_uprobe.bpf.o, test_uprobe_autoattach.bpf.o,
+   test_urandom_usdt.bpf.o, test_usdt.bpf.o, test_usdt_multispec.bpf.o,
+   uprobe_multi.bpf.o, uprobe_multi_usdt.bpf.o, uprobe_multi_verifier.bpf.o,
    uprobe_syscall_executed.bpf.o, uretprobe_stack.bpf.o.
-2. Qdisc helper availability/header mismatch:
-   bpf_qdisc_dynptr_use_after_invalidate_clone.bpf.o,
-   bpf_qdisc_fail__incompl_ops.bpf.o,
-   bpf_qdisc_fail__invalid_dynptr.bpf.o,
-   bpf_qdisc_fail__invalid_dynptr_cross_frame.bpf.o,
-   bpf_qdisc_fail__invalid_dynptr_slice.bpf.o, bpf_qdisc_fifo.bpf.o,
-   bpf_qdisc_fq.bpf.o.
-3. Feature or config-gated areas still skipped by the permissive build:
-   cgroup_iter_memcg.bpf.o, dmabuf_iter.bpf.o, dynptr_success.bpf.o,
-   fsession_test.bpf.o, get_branch_snapshot.bpf.o,
-   get_func_args_fsession_test.bpf.o, get_func_ip_fsession_test.bpf.o,
-   get_func_ip_test.bpf.o, kprobe_multi_session_cookie.bpf.o,
-   kprobe_multi_verifier.bpf.o, kprobe_write_ctx.bpf.o, loop6.bpf.o,
-   lwt_misc.bpf.o, mptcp_sock.bpf.o, mptcp_subflow.bpf.o,
-   profiler1.bpf.o, profiler2.bpf.o, profiler3.bpf.o,
-   stacktrace_map_skip.bpf.o, test_attach_probe.bpf.o,
-   test_bpf_nf.bpf.o, test_lwt_ip_encap.bpf.o, test_overhead.bpf.o,
-   test_probe_user.bpf.o, test_urandom_usdt.bpf.o, test_usdt.bpf.o,
-   test_usdt_multispec.bpf.o, tracing_multi_session_attach.bpf.o,
-   trigger_bench.bpf.o, uprobe_multi.bpf.o, uprobe_multi_session.bpf.o,
-   uprobe_multi_session_cookie.bpf.o, uprobe_multi_session_recursive.bpf.o,
-   uprobe_multi_usdt.bpf.o, uprobe_multi_verifier.bpf.o.
+2. UML pt_regs layout mismatch for PT_REGS_* users (20):
+   bpf_iter_tasks.bpf.o, bpf_syscall_macro.bpf.o, get_func_ip_test.bpf.o,
+   kprobe_multi_verifier.bpf.o, kprobe_write_ctx.bpf.o, loop1.bpf.o,
+   loop2.bpf.o, loop3.bpf.o, loop6.bpf.o, lsm.bpf.o, profiler1.bpf.o,
+   profiler2.bpf.o, profiler3.bpf.o, rcu_read_lock.bpf.o,
+   test_attach_probe.bpf.o, test_overhead.bpf.o, test_perf_skip.bpf.o,
+   test_sleepable_tracepoints.bpf.o, test_vmlinux.bpf.o, trigger_bench.bpf.o.
+   A UML-aware PT_REGS variant in libbpf's bpf_tracing.h could recover
+   this whole bucket generically.
+3. Hardware dependent (1): dmabuf_iter.bpf.o (no DMA-BUF devices).
 
 Skipped host-side test objects:
 attach_probe, bpf_cookie, bpf_iter, bpf_nf, bpf_qdisc, cgroup_iter_memcg,
