@@ -55,6 +55,9 @@ def process_object(
             "file": obj.name,
             "load_error": load.stderr.strip()[-500:],
         }]
+    if not pin_dir.is_dir():
+        # program-less object (BTF fixture): loadall succeeds, pins nothing
+        return [{"file": obj.name, "load_error": "no programs in object"}]
 
     rows = []
     for pin in sorted(pin_dir.iterdir()):

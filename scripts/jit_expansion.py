@@ -35,7 +35,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-XLATED_RE = re.compile(r"^\s*\d+: \(([0-9a-f]{2})\) ")
+XLATED_RE = re.compile(r"^\s*\d+: \(([0-9a-f]{2})\) (.*)")
 JITED_RE = re.compile(r"^\s*([0-9a-f]+):\t(\S+)(?:\t(.*))?$")
 NOP_MNEMONICS = {"nop", "nopl", "nopw"}
 
@@ -49,6 +49,7 @@ mount -t proc proc /proc 2>/dev/null || true
 mount -t sysfs sysfs /sys 2>/dev/null || true
 mkdir -p /sys/fs/bpf 2>/dev/null || true
 mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
+{insmods}
 python3 {guest_script} --objects {objects} --bpftool {bpftool} \\
     --out {out} --shard {shard} {extra} > {log} 2>&1
 echo $? > {rc_file}
@@ -56,16 +57,31 @@ sync
 halt -f 2>/dev/null || poweroff -f 2>/dev/null || echo o > /proc/sysrq-trigger
 """
 
+# kfunc-importing objects (bpf_testmod kfuncs) fail loadall unless the test
+# kmods are present in the guest.
+KMOD_NAMES = ("bpf_testmod.ko", "bpf_test_modorder_x.ko", "bpf_test_modorder_y.ko")
+
+
+def find_insmods() -> str:
+    kmod_dir = ROOT / ".build/bpf-next/tools/testing/selftests/bpf/test_kmods"
+    return "\n".join(
+        f"insmod {kmod_dir / name} 2>/dev/null || true"
+        for name in KMOD_NAMES
+        if (kmod_dir / name).is_file()
+    )
+
 
 def run_guests(args, out_dir: pathlib.Path) -> None:
     tmp = out_dir / "tmp"
     tmp.mkdir(parents=True, exist_ok=True)
     extra = f"--limit {args.limit}" if args.limit else ""
+    insmods = find_insmods()
 
     procs = []
     for k in range(args.shards):
         init = tmp / f"init-{k}"
         init.write_text(INIT_TEMPLATE.format(
+            insmods=insmods,
             guest_script=ROOT / "scripts/jit_expansion_guest.py",
             objects=args.objects,
             bpftool=args.bpftool,
@@ -107,13 +123,23 @@ def run_guests(args, out_dir: pathlib.Path) -> None:
 # Analysis
 # ---------------------------------------------------------------------------
 
-def classify_xlated(op: int) -> str:
+def classify_xlated(op: int, text: str) -> str:
     if op == 0x18:
         return "ld_imm64"
     if op == 0x85:
-        return "call"
+        # tail calls and subprog calls have very different native costs
+        # than helper/kfunc calls; the dump text distinguishes them
+        if "call bpf_tail_call" in text:
+            return "call_tail"
+        if "call pc+" in text or "call pc-" in text:
+            return "call_sub"
+        return "call_helper"
     if op == 0x95:
         return "exit"
+    if op == 0x05:
+        return "jmp_ja"  # unconditional
+    if op == 0xE5:
+        return "may_goto"
     cls = op & 0x07
     mode = op & 0xE0
     if cls == 0x03 and mode == 0xC0:
@@ -121,7 +147,7 @@ def classify_xlated(op: int) -> str:
     if cls == 0x01:
         return "ldx_memsx" if mode == 0x80 else "ldx"
     return {0x00: "ld_other", 0x02: "st", 0x03: "stx",
-            0x04: "alu32", 0x05: "jmp", 0x06: "jmp32", 0x07: "alu64"}[cls]
+            0x04: "alu32", 0x05: "jmp_cond", 0x06: "jmp32", 0x07: "alu64"}[cls]
 
 
 GUARD_BACK = (
@@ -142,6 +168,22 @@ def scan_jited(text: str) -> dict:
             insns.append((m.group(2), m.group(3) or ""))
 
     nops = sum(1 for mn, _ in insns if mn in NOP_MNEMONICS)
+
+    # UML-only overhead from the uml-veristat JIT patches (params register
+    # plumbing + far helper targets); absent on native x86, so it must be
+    # separated before comparing ratios with real hosts:
+    #   pushq/popq %r9 around every helper call, the %gs params frame at
+    #   entry (movabsq+addq pair), and movabsq $helper,%r11 before an
+    #   indirect callq where native x86 emits one direct call rel32.
+    uml_overhead = 0
+    for i, (mn, ops) in enumerate(insns):
+        if (mn, ops) in (("pushq", "%r9"), ("popq", "%r9")):
+            uml_overhead += 1
+        elif mn == "addq" and ops.startswith("%gs:"):
+            uml_overhead += 2  # movabsq $off,%r9 + addq %gs:...,%r9
+        elif (mn == "callq" and ops == "*%r11"
+              and i > 0 and insns[i - 1][0] == "movabsq"):
+            uml_overhead += 1  # movabsq+indirect vs one direct call
 
     sites = 0
     guard_insns = 0
@@ -169,6 +211,7 @@ def scan_jited(text: str) -> dict:
         "nop_insns": nops,
         "guard_sites": sites,
         "guard_insns": guard_insns,
+        "uml_overhead_insns": uml_overhead,
     }
 
 
@@ -177,7 +220,7 @@ def scan_xlated(text: str) -> dict[str, int]:
     for line in text.splitlines():
         m = XLATED_RE.match(line)
         if m:
-            key = classify_xlated(int(m.group(1), 16))
+            key = classify_xlated(int(m.group(1), 16), m.group(2))
             hist[key] = hist.get(key, 0) + 1
     return hist
 
@@ -216,6 +259,7 @@ def analyze(out_dir: pathlib.Path) -> None:
     tn = sum(e["nop_insns"] for e in measured)
     tg = sum(e["guard_insns"] for e in measured)
     sites = sum(e["guard_sites"] for e in measured)
+    tu = sum(e.get("uml_overhead_insns", 0) for e in measured)
     hist_total: dict[str, int] = {}
     for e in measured:
         for k, v in e.get("hist", {}).items():
@@ -232,6 +276,11 @@ def analyze(out_dir: pathlib.Path) -> None:
         "guard_insns": tg,
         "guard_share_of_jited": round(tg / tj, 4) if tj else None,
         "nop_share_of_jited": round(tn / tj, 4) if tj else None,
+        "uml_overhead_insns": tu,
+        "uml_overhead_share_of_jited": round(tu / tj, 4) if tj else None,
+        # what the corpus ratio would be without the uml-veristat JIT
+        # patches' call/params plumbing — the fleet-comparable number
+        "ratio_native_equivalent": round((tj - tu) / tx, 4) if tx else None,
         # opt#1 folds movabsq+sub away: 2 insns per site (1 when off==0
         # collapses add+sub+mov into add), use 2 as the upper bound
         "opt1_saved_insns_max": 2 * sites,
