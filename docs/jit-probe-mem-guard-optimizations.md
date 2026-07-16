@@ -1,7 +1,12 @@
 # Task: shrink the x86 BPF JIT probe-memory guard
 
-**Status:** optimization #1 written (full diff inline below, unbuilt/untested
-here — sandbox has no external network); optimization #2 designed, deferred.
+**Status (2026-07-15):** optimization #1 VALIDATED on UML — in the stack as
+`patches/uml-veristat/0009c-*.patch`; correctness gates green, size delta
+exact (−1.9 insns / −8.4 B per site over 488 corpus sites), microbenchmark
+−30% runtime (see "Reproducing the UML numbers" below and
+`reports/jit-expansion/2026-07-15-520d7d794.md`). Upstream campaign:
+`docs/upstream-jit-guard-fold/PLAN.md` + mainline-variant patch in the same
+directory. Optimization #2 still designed-only, deferred.
 
 This is a **general x86 BPF JIT change, not part of the uml-veristat patch
 stack** — it is a tangent surfaced while looking at UML-JITed code, and it is
@@ -205,6 +210,43 @@ Higher risk, conditional payoff. Land #1 first, measure, then add #2 behind the
 gate if the numbers justify it.
 
 **Combined target:** guard shrinks ~40 B / 9 insns → ~20 B / 6 insns.
+
+## Reproducing the UML numbers
+
+Everything below runs on this machine; each kernel build is ~7 min, each
+bench run ~1 min, each full corpus sweep ~40 min. Never pipe build.sh
+through `tail` (masks the exit code) and mind followups finding 25: if a
+build dies with ETXTBSY at "Installing core artifacts", bpf_testmod is left
+stale → rerun with `--rebuild-testmod`.
+
+```bash
+# A side — folded guard (0009c is in the stack, so a plain build has it):
+SKIP_DEP_INSTALL=1 ./build.sh > /tmp/build-a.log 2>&1
+./benchmarks/probe-mem/run.sh with-0009c
+python3 scripts/jit_expansion.py --out-dir .build/jit-expansion/opt1
+
+# B side — stock guard:
+SKIP_DEP_INSTALL=1 ./build.sh --skip-patches=0009c > /tmp/build-b.log 2>&1
+./benchmarks/probe-mem/run.sh no-0009c
+python3 scripts/jit_expansion.py --out-dir .build/jit-expansion/stock
+
+# Compare:
+python3 scripts/jit_expansion_diff.py \
+    .build/jit-expansion/stock/report.json .build/jit-expansion/opt1/report.json
+```
+
+Expected (2026-07-15, pin 520d7d794, WSL2 host):
+
+- bench guard_bench: stock 132–136 ns/run (median 134), folded 93–97
+  (median 93) — **−30.6%**; plain_bench control ~44 ns on both (flat).
+- bench static counts (printed by run.sh): stock 2,565 insns / 1,696 guard
+  insns (160×9 + 32×8), folded 2,213 / 1,344 (192×7) — exact.
+- corpus diff: −928 insns / −4,109 B over 488 unchanged guard sites, and
+  every program's insn delta equals its guard-insn delta.
+
+Timing trials vary a few ns run to run; the medians above reproduced
+within ±2 ns across boots. The bench prints `Return value: 2` (XDP_PASS)
+on every trial — anything else means the guards are misfiring.
 
 ## Build / test / verify (run where there IS network)
 

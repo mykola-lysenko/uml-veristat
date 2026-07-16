@@ -1,0 +1,100 @@
+From 9ae8f50a2ee436d6574e243785a49c86fb56ae8e Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Wed, 15 Jul 2026 17:43:57 -0700
+Subject: [PATCH] bpf, x86: fold the probe-mem low bound into the guard offset
+ add
+
+The x86-64 JIT guards every BPF_PROBE_MEM / BPF_PROBE_MEMSX load with an
+inline address-range check: it computes (src_reg + insn->off -
+VSYSCALL_ADDR) in r11 and compares it against a precomputed limit,
+materializing VSYSCALL_ADDR in r10 with a movabsq, adding insn->off, and
+subtracting r10.
+
+insn->off is an s16 and VSYSCALL_ADDR is a small negative constant fixed
+at compile time, so (insn->off - VSYSCALL_ADDR) always fits a
+sign-extended imm32. Fold the subtraction into the offset add and emit a
+single "add r11, imm32", dropping the movabsq and the sub: up to
+2 instructions / 13 bytes less per guard site on the hot path. These
+guards front every untrusted BTF pointer dereference, and BTF-pointer-
+heavy tracing and LSM programs commonly carry tens to hundreds of guard
+sites. The compare, the jump, and the exception-fixup path are unchanged.
+
+The is_simm32() gate keeps the previous explicit materialize-and-subtract
+sequence as a fallback so behavior is identical if the bound expression
+ever stops fitting imm32.
+
+On a guard-saturated microbenchmark (192 probe-mem loads of valid kernel
+memory per program run, BPF_PROG_TEST_RUN with 2M repetitions), the fold
+reduces the program body from 2,565 to 2,213 instructions and improves
+runtime by ~30%; a guard-free control program is unaffected. Across the
+BPF selftests object corpus (1,938 programs), 488 guard sites shrink by
+1.9 instructions / 8.4 bytes on average with no other code change.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ arch/x86/net/bpf_jit_comp.c | 42 +++++++++++++++++++++++++++----------
+ 1 file changed, 31 insertions(+), 11 deletions(-)
+
+diff --git a/arch/x86/net/bpf_jit_comp.c b/arch/x86/net/bpf_jit_comp.c
+index de7515ea1..a9a656214 100644
+--- a/arch/x86/net/bpf_jit_comp.c
++++ b/arch/x86/net/bpf_jit_comp.c
+@@ -2389,24 +2389,44 @@ st:			insn_off = insn->off;
+ 				 */
+ 
+ 				u64 limit = TASK_SIZE_MAX + PAGE_SIZE - VSYSCALL_ADDR;
++				s64 fold_off = (s64)insn->off - (s64)VSYSCALL_ADDR;
+ 				u8 *end_of_jmp;
+ 
+-				/* movabsq r10, VSYSCALL_ADDR */
+-				emit_mov_imm64(&prog, BPF_REG_AX, (long)VSYSCALL_ADDR >> 32,
+-					       (u32)(long)VSYSCALL_ADDR);
+-
+ 				/* mov src_reg, r11 */
+ 				EMIT_mov(AUX_REG, src_reg);
+ 
+-				if (insn->off) {
+-					/* add r11, insn->off */
++				if (is_simm32(fold_off)) {
++					/*
++					 * The check compares (src_reg + insn->off -
++					 * VSYSCALL_ADDR) against limit. insn->off is
++					 * an s16 and VSYSCALL_ADDR is a small negative
++					 * constant, so their difference always fits a
++					 * sign-extended imm32: fold the VSYSCALL_ADDR
++					 * subtraction into the offset add, saving the
++					 * movabsq and the sub on every guard site.
++					 */
++					/* add r11, insn->off - VSYSCALL_ADDR */
+ 					maybe_emit_1mod(&prog, AUX_REG, true);
+-					EMIT2_off32(0x81, add_1reg(0xC0, AUX_REG), insn->off);
+-				}
++					EMIT2_off32(0x81, add_1reg(0xC0, AUX_REG),
++						    (s32)fold_off);
++				} else {
++					/* movabsq r10, VSYSCALL_ADDR */
++					emit_mov_imm64(&prog, BPF_REG_AX,
++						       (long)VSYSCALL_ADDR >> 32,
++						       (u32)(long)VSYSCALL_ADDR);
++
++					if (insn->off) {
++						/* add r11, insn->off */
++						maybe_emit_1mod(&prog, AUX_REG, true);
++						EMIT2_off32(0x81,
++							    add_1reg(0xC0, AUX_REG),
++							    insn->off);
++					}
+ 
+-				/* sub r11, r10 */
+-				maybe_emit_mod(&prog, AUX_REG, BPF_REG_AX, true);
+-				EMIT2(0x29, add_2reg(0xC0, AUX_REG, BPF_REG_AX));
++					/* sub r11, r10 */
++					maybe_emit_mod(&prog, AUX_REG, BPF_REG_AX, true);
++					EMIT2(0x29, add_2reg(0xC0, AUX_REG, BPF_REG_AX));
++				}
+ 
+ 				/* movabsq r10, limit */
+ 				emit_mov_imm64(&prog, BPF_REG_AX, (long)limit >> 32,
+-- 
+2.43.0
+

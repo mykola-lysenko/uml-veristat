@@ -9,3 +9,4 @@ bpf_uml_workspace/
 .DS_Store
 __pycache__/
 *.profraw
+benchmarks/**/*.bpf.o
