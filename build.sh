@@ -436,7 +436,8 @@ case "${DISTRO_FAMILY}" in
         build-essential git bc flex bison kmod openssl \
         libelf-dev libssl-dev libdw-dev \
         pkg-config cmake ninja-build python3 \
-        libcap-dev curl wget rsync zlib1g-dev ;;
+        libcap-dev curl wget rsync zlib1g-dev \
+        iptables nftables ;;
   fedora)
     PKG_MGR="dnf"; command -v dnf >/dev/null 2>&1 || PKG_MGR="yum"
     if [ "${PKG_MGR}" = "dnf" ] &&
@@ -968,6 +969,30 @@ CONFIG_ARGS=(
     --enable  NF_CONNTRACK
     --enable  NF_TABLES
     --enable  NF_FLOW_TABLE
+    # bpf_nf and xdp_flowtable shell out to iptables-legacy/nft, which come
+    # from hostfs — on hosts that have them (CI runners) the tests really
+    # run, so the guest kernel needs the whole legacy-xtables + nft-family
+    # set from tools/testing/selftests/bpf/config; without it they fail
+    # with "iptables or kernel needs to be upgraded" / EINVAL on add table.
+    --enable  NETFILTER_XTABLES
+    --enable  NETFILTER_XTABLES_LEGACY
+    --enable  NETFILTER_XT_CONNMARK
+    --enable  NETFILTER_XT_MATCH_STATE
+    --enable  NETFILTER_XT_TARGET_CT
+    --enable  IP_NF_IPTABLES
+    --enable  IP_NF_IPTABLES_LEGACY
+    --enable  IP_NF_FILTER
+    --enable  IP_NF_RAW
+    --enable  IP_NF_TARGET_SYNPROXY
+    --enable  IP6_NF_IPTABLES
+    --enable  IP6_NF_IPTABLES_LEGACY
+    --enable  IP6_NF_FILTER
+    --enable  NF_CONNTRACK_ZONES
+    --enable  NF_TABLES_INET
+    --enable  NF_TABLES_NETDEV
+    --enable  NF_TABLES_IPV4
+    --enable  NF_TABLES_IPV6
+    --enable  NF_FLOW_TABLE_INET
     --enable  DEBUG_INFO
     --enable  DEBUG_INFO_BTF
     --enable  PAHOLE_HAS_SPLIT_BTF
