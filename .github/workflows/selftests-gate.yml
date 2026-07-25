@@ -1,0 +1,54 @@
+name: Selftests regression gate
+
+on:
+  pull_request:
+    paths:
+      - 'build.sh'
+      - 'uml-test-progs'
+      - 'patches/**'
+      - 'scripts/**'
+      - 'corpus_manifest.json'
+      - 'bpf-next-commit'
+      - 'reports/selftests-baseline/**'
+      - '.github/workflows/selftests-gate.yml'
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: selftests-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Full test_progs sweep vs baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build UML kernel and selftests
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./build.sh
+
+      - name: Run gate (full sweep + baseline compare)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/selftests_gate.py | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sweep logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftests-gate-logs-${{ github.sha }}
+          path: .build/test-logs/
+          if-no-files-found: warn
+          retention-days: 14
