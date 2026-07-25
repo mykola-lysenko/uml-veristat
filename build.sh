@@ -993,6 +993,9 @@ CONFIG_ARGS=(
     --enable  NF_TABLES_IPV4
     --enable  NF_TABLES_IPV6
     --enable  NF_FLOW_TABLE_INET
+    # xdp_flowtable's "nft add rule ... flow add @f" is the nft flow-offload
+    # expression, a separate symbol from the NF_FLOW_TABLE core.
+    --enable  NFT_FLOW_OFFLOAD
     --enable  DEBUG_INFO
     --enable  DEBUG_INFO_BTF
     --enable  PAHOLE_HAS_SPLIT_BTF
