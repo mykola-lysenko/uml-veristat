@@ -1,0 +1,5 @@
+# Tests excluded from gate verdicts in BOTH directions (never fail, never
+# ratchet). One test name per line; put the evidence (CI run link, issue)
+# in a trailing comment. Keep this list empty unless a flake has been
+# observed in CI at least twice — the gate's standalone retry already
+# absorbs one-off flakes.
