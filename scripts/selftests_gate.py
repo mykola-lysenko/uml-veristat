@@ -254,6 +254,11 @@ def main() -> int:
         else:
             src = out_dir / "summary.json"
         name = f"{time.strftime('%Y-%m-%d')}-{pin_prefix[:9]}-gate"
+        suffix = 1
+        while (BASELINE_DIR / f"{name}.json").exists():
+            suffix += 1
+            name = (f"{time.strftime('%Y-%m-%d')}-{pin_prefix[:9]}"
+                    f"-gate{suffix}")
         dst = BASELINE_DIR / f"{name}.json"
         shutil.copyfile(src, dst)
         md = src.with_suffix(".md")
