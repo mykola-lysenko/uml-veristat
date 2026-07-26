@@ -100,10 +100,19 @@ build workflow's every-push behavior untouched):
 - `timeout-minutes: 120`, concurrency group per ref with
   cancel-in-progress.
 
+## Speedups (added after v1)
+
+- **Parallel chunks**: `run_test_chunks.py --jobs N` runs N chunks in
+  concurrent UML guests (~1.8G host RAM each) and merges results in
+  chunk-index order, so output is deterministic and identical to a serial
+  run (validated: -j6 local sweep bit-identical to serial, 18.7 → 4.0 min).
+  Timed-out chunks are killed by session id so parallel neighbors survive.
+  CI uses `--jobs 3`.
+- **ccache**: `UML_BUILD_CCACHE=1` makes build.sh masquerade gcc/cc via
+  PATH and wrap clang in a cached single-word wrapper; the workflow
+  persists `.ccache` through actions/cache keyed on pin+patches.
+
 ## Later (explicitly out of scope for v1)
 
-- Parallel chunks (N concurrent UML guests) if runner wall time becomes
-  annoying; the harness change is small but memory per guest (`UML_MEM`
-  default 1792M) needs checking against runner RAM first.
 - Subtest-level gating (`test:OK` today hides subtest churn).
 - Gating the JIT-expansion corpus metrics the same way.

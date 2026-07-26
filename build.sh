@@ -1075,6 +1075,31 @@ make ARCH=um PAHOLE="${PAHOLE_BIN}" olddefconfig
 info "Kernel configured: $(grep "^CONFIG_BPF_SYSCALL=y" .config && echo BPF_SYSCALL enabled)"
 
 # ------------------------------------------------------------------------------
+# Optional compiler caching (UML_BUILD_CCACHE=1, used by the CI gate)
+# ------------------------------------------------------------------------------
+# gcc/cc are intercepted with PATH masquerade symlinks. clang is invoked by
+# absolute path everywhere (so masquerade cannot catch it) and is checked
+# with [ -x ] and $(shell ...) probes (so a multi-word "ccache clang" value
+# would break) — a one-line wrapper script keeps it a single executable.
+if [ "${UML_BUILD_CCACHE:-0}" = "1" ]; then
+    if command -v ccache >/dev/null 2>&1; then
+        CCACHE_MASQ="${WORKDIR}/ccache-bin"
+        mkdir -p "${CCACHE_MASQ}"
+        for tool in gcc cc g++ c++; do
+            ln -sf "$(command -v ccache)" "${CCACHE_MASQ}/${tool}"
+        done
+        printf '#!/bin/sh\nexec ccache %q "$@"\n' "${CLANG}" \
+            > "${CCACHE_MASQ}/clang-cached"
+        chmod +x "${CCACHE_MASQ}/clang-cached"
+        CLANG="${CCACHE_MASQ}/clang-cached"
+        export PATH="${CCACHE_MASQ}:${PATH}"
+        info "ccache enabled: $(ccache --version | head -1) (dir: ${CCACHE_DIR:-default})"
+    else
+        warn "UML_BUILD_CCACHE=1 but ccache is not installed; building without it."
+    fi
+fi
+
+# ------------------------------------------------------------------------------
 # Build the UML kernel
 # ------------------------------------------------------------------------------
 step "6/7  Building UML kernel"
