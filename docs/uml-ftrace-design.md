@@ -48,6 +48,23 @@ each milestone.
 - `kprobe_multi_testmod_test` is OK in baseline — verify why before trusting
   (probably degenerate pass).
 
+## Pivotal finding: -mcmodel=large vs fentry (2026-07-26)
+
+M1 booted (26,652 mcount sites recorded via recordmcount) but ftrace_bug
+fired on the first site at boot: `actual: 49:ba:...` — UML builds 64-bit
+kernels with **-mcmodel=large**, so -mfentry emits a 12-byte
+`movabs $__fentry__,%r10; call *%r10` sequence, not the 5-byte call every
+piece of x86 patching machinery (ftrace, bpf_arch_text_poke,
+X86_PATCH_SIZE, trampoline's func+5 orig-call resume) assumes.
+
+Decision: switch UML to **-mcmodel=small** rather than teach the world
+about 12-byte sites. The whole image links below 2GB (text at 0x60000000,
+sections end ~0x62xxxxxx), and M0's bounded execmem keeps module text,
+module data (RIP-relative in small model), and BPF images within rel32
+reach of _stext. The large model was there for far-module relocations —
+structurally obsolete with bounded execmem. Side benefit: kills movabs
+bloat kernel-wide.
+
 ## Milestones
 
 **M0 — bounded execmem (standalone win + prerequisite)**
@@ -95,6 +112,35 @@ full gate sweep to measure the family flip.
   (stack-unwind family).
 - Consider dropping far-call indirection in JIT for in-range targets
   (measure with jit-expansion harness).
+
+## Status 2026-07-26: M0–M2 SHIPPED as patches 0020 + 0020b
+
+First full sweep on the ftrace kernel: **549 OK / 110 FAIL / 77 SKIP**
+(+38 net vs the 511 baseline; 41 new passes — the LSM family, timers,
+tracing/trampoline family, cgroup storage, and more).
+
+Post-M2 findings:
+- **map_kptr regression → patch 0020b**: the 0009b PROBE_MEM guard span
+  started at uml_physmem; module kfunc/kptr objects now live BELOW it in
+  the module window, so guarded loads rejected them (retval 2 = garbage
+  refcount read). Span low bound extended to MODULES_VADDR. Bonus:
+  map_kptr_race — a long-standing pre-existing FAIL — now passes too.
+- **generic-y ftrace.h shadowing**: arch/um/include/asm/Kbuild had
+  `generic-y += ftrace.h`, which generates a wrapper that shadows
+  arch/x86/um/asm/ftrace.h. Must be removed or the arch header is
+  silently ignored.
+- **patch 0001's patchable_function_entry(5,0)** (in both the wrapper .c
+  and asm/syscall.h prototypes) pre-nopped entries and tripped
+  ftrace_bug at boot — obsolete with real fentry, removed.
+- **Still failing (next iteration)**: fentry_test / fexit_test /
+  fentry_fexit — all **lskel** loads fail -EOPNOTSUPP while the same
+  attaches work via regular skeletons (undiagnosed; loader-prog path
+  rejects tracing progs somewhere). get_func_ip_test, d_path,
+  module_attach, vmlinux, missed, test_overhead — individual triage.
+  bpf_iter, task_local_storage families untested against expectations.
+- **Local-env caveat**: local sweeps show xdp_synproxy FAIL /
+  xdp_flowtable SKIP — CI-canonical baseline vs missing local
+  iptables-legacy/nft, not a kernel regression.
 
 ## Iteration workflow
 

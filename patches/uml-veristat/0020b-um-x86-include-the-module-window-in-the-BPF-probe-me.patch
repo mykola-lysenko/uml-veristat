@@ -1,0 +1,42 @@
+From fa23ae9627dad0f92ffa1f6c1e7cb165a3ae41c9 Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Sat, 25 Jul 2026 20:36:21 -0700
+Subject: [PATCH] um: x86: include the module window in the BPF probe-memory
+ span
+
+The PROBE_MEM guard accepted [uml_physmem, end_vm) as kernel memory.
+With modules and BPF images now living in the dedicated window just
+below the kernel image, kptr/kfunc objects in module data sit below
+uml_physmem and guarded loads wrongly rejected them (map_kptr regressed
+to retval 2: the guarded refcount read returned garbage). Extend the
+span's low bound to MODULES_VADDR; both bounds are still fixed at boot.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ arch/x86/net/bpf_jit_comp.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/arch/x86/net/bpf_jit_comp.c b/arch/x86/net/bpf_jit_comp.c
+index a8f1316b0..fff8e78c7 100644
+--- a/arch/x86/net/bpf_jit_comp.c
++++ b/arch/x86/net/bpf_jit_comp.c
+@@ -2520,8 +2520,14 @@ st:			insn_off = insn->off;
+ 				 * exception fixup.
+ 				 */
+ #ifdef CONFIG_UML
+-				u64 span_base = uml_physmem;
+-				u64 limit = end_vm - uml_physmem;
++				/*
++				 * MODULES_VADDR (the module/execmem window
++				 * just below the kernel image) is the lowest
++				 * kernel address now that modules no longer
++				 * live in vmalloc space.
++				 */
++				u64 span_base = MODULES_VADDR;
++				u64 limit = end_vm - MODULES_VADDR;
+ 				u8 jcc_to_load = X86_JB;
+ #else
+ 				u64 span_base = VSYSCALL_ADDR;
+-- 
+2.43.0
+
