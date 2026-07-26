@@ -56,6 +56,9 @@ jobs:
           UML_BUILD_CCACHE: 1
           CCACHE_DIR: ${{ github.workspace }}/.ccache
           CCACHE_MAXSIZE: 3G
+          # The prebuilt LLVM is re-extracted every run, so the default
+          # mtime-based compiler identity would never match; hash content.
+          CCACHE_COMPILERCHECK: content
         run: ./build.sh
 
       - name: ccache stats
