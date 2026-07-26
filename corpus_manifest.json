@@ -45,10 +45,6 @@
           "errno": -95,
           "reason": "raw object contains intentionally incompatible testmod_zeroed struct_ops state; the selftest harness disables/mutates struct_ops maps and program autoload before loading"
         },
-        "tcp_ca_kfunc.bpf.o": {
-          "errno": -22,
-          "reason": "object calls TCP congestion-control kfuncs, for example bbr_cwnd_event_tx_start, that are absent from the current UML kernel or module BTF"
-        },
         "test_map_in_map.bpf.o": {
           "errno": -22,
           "reason": "libbpf fails to create mim_array because the legacy map-in-map object relies on the harness calling bpf_map__set_inner_map_fd() before load"
@@ -106,10 +102,6 @@
         "struct_ops_module.bpf.o": {
           "errno": -95,
           "reason": "raw object contains intentionally incompatible testmod_zeroed struct_ops state; the selftest harness disables/mutates struct_ops maps and program autoload before loading"
-        },
-        "tcp_ca_kfunc.bpf.o": {
-          "errno": -22,
-          "reason": "object calls TCP congestion-control kfuncs, for example bbr_cwnd_event_tx_start, that are absent from the current UML kernel or module BTF"
         },
         "test_map_in_map.bpf.o": {
           "errno": -22,

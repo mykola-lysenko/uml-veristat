@@ -196,7 +196,12 @@ fi
 
 cat > "${INIT_SCRIPT}" << INIT_EOF
 #!/bin/sh
-PATH=/usr/sbin:/usr/bin:/sbin:/bin:\$PATH
+# The kernel exec's init with only HOME and TERM in the environment, so
+# PATH set here is otherwise shell-local: without the export, test_progs
+# and every tool it spawns get no PATH at all, and C programs that
+# execvp() bare names (ip netns exec -> sysctl/ethtool/...) fall back to
+# libc's _CS_PATH default of /bin:/usr/bin, missing all of sbin.
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin\${PATH:+:\$PATH}
 
 mount -t proc proc /proc 2>/dev/null || true
 mount -t sysfs sysfs /sys 2>/dev/null || true
