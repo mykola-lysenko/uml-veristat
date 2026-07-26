@@ -437,7 +437,7 @@ case "${DISTRO_FAMILY}" in
         libelf-dev libssl-dev libdw-dev \
         pkg-config cmake ninja-build python3 \
         libcap-dev curl wget rsync zlib1g-dev \
-        iptables nftables ;;
+        iptables nftables keyutils fsverity ;;
   fedora)
     PKG_MGR="dnf"; command -v dnf >/dev/null 2>&1 || PKG_MGR="yum"
     if [ "${PKG_MGR}" = "dnf" ] &&
@@ -1008,6 +1008,13 @@ CONFIG_ARGS=(
     --enable  X509_CERTIFICATE_PARSER
     --enable  PKCS7_MESSAGE_PARSER
     --enable  SYSTEM_TRUSTED_KEYRING
+    # SYSTEM_DATA_VERIFICATION is def_bool n with no prompt — enabling it
+    # directly is a silent no-op under olddefconfig; it must be selected.
+    # MODULE_SIG (from the official selftests config) selects it via
+    # MODULE_SIG_FORMAT, and the kernel-side pkcs7 verification it brings
+    # is what signed light skeletons (fentry_test/fexit_test/fentry_fexit
+    # lskels, signed_loader, verify_pkcs7_sig) need at prog-load time.
+    --enable  MODULE_SIG
     --enable  SYSTEM_DATA_VERIFICATION
     --set-str SYSTEM_TRUSTED_KEYS ""
     --enable  CRYPTO
