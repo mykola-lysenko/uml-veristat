@@ -1067,6 +1067,15 @@ CONFIG_ARGS=(
     --enable  PERF_EVENTS
     --enable  FTRACE_SYSCALLS
     --enable  BPF_LSM
+    # Patch 0020 brings DYNAMIC_FTRACE with direct calls to UML — the
+    # foundation for fentry/fexit/fmod_ret/LSM BPF trampoline attach.
+    # Graph/stack tracers and the profiler are untested on UML; keep
+    # them off until they earn their way in.
+    --enable  FUNCTION_TRACER
+    --enable  DYNAMIC_FTRACE
+    --disable FUNCTION_GRAPH_TRACER
+    --disable STACK_TRACER
+    --disable FUNCTION_PROFILER
 )
 scripts/config "${CONFIG_ARGS[@]}"
 

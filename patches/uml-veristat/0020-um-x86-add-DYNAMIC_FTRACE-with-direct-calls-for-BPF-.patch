@@ -1,0 +1,610 @@
+From b229578e349483c36c08e677baf9dcb83408fef2 Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Sat, 25 Jul 2026 20:23:46 -0700
+Subject: [PATCH] um: x86: add DYNAMIC_FTRACE with direct calls for BPF
+ trampolines
+
+Give 64-bit UML a working ftrace stack so fentry/fexit/fmod_ret/LSM
+BPF programs can attach:
+
+- Switch from -mcmodel=large to small: the image links below 2GB, and
+  the large model made -mfentry emit 12-byte movabs+indirect-call
+  sequences that no x86 patching machinery (ftrace, X86_PATCH_SIZE,
+  bpf_arch_text_poke) can handle. Small model restores the canonical
+  5-byte fentry call.
+- Carve a 256MB module/execmem window immediately below the kernel
+  image (the mirror of native x86-64's top-2GB module area): keeps
+  small-model module R_X86_64_32S relocations representable and every
+  patched rel32 call site (ftrace direct calls into BPF trampolines,
+  kfunc calls) in range. Extend the kernel-mode fault window in
+  segv() so lazily-synced kernel mappings there resolve.
+- Select HAVE_(FUNCTION_TRACER|DYNAMIC_FTRACE|WITH_ARGS|
+  WITH_DIRECT_CALLS|FTRACE_MCOUNT_RECORD|FENTRY); mcount tables come
+  from scripts/recordmcount.
+- arch/um/kernel/ftrace.c: 5-byte call/nop patching via memcpy inside
+  an os_protect_memory(RW->RX) window; the UML kernel is a host
+  process and may patch its own text directly.
+- arch/x86/um/ftrace_64.S: WITH_ARGS ftrace_caller building a partial
+  um pt_regs (HOST_* gp slots) frame, function_trace_op dispatch, and
+  the shared-site direct-call tail jump via the ORIG_AX stash.
+- Drop the patchable_function_entry(5,0) hack from the __x64_sys_
+  wrappers: with real fentry instrumentation it produced pre-nopped
+  entries that tripped ftrace_bug() at boot.
+- Strip CC_FLAGS_FTRACE from USER_CFLAGS: host-side objects must not
+  call the kernel's __fentry__.
+
+Validated in-guest: modify_return, tracing_struct (module fentry with
+struct args), get_func_args_test, recursion, trampoline_count,
+fexit_stress all pass; boot nops 26,648 recorded sites cleanly.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ arch/um/Makefile                   |  10 ++-
+ arch/um/include/asm/Kbuild         |   1 -
+ arch/um/include/asm/pgtable.h      |  15 ++++-
+ arch/um/kernel/Makefile            |   4 ++
+ arch/um/kernel/asm-offsets.c       |   2 +
+ arch/um/kernel/ftrace.c            | 103 +++++++++++++++++++++++++++++
+ arch/um/kernel/mem.c               |  36 ++++++++++
+ arch/um/kernel/trap.c              |   3 +-
+ arch/x86/um/Kconfig                |   6 ++
+ arch/x86/um/Makefile               |   1 +
+ arch/x86/um/asm/ftrace.h           |  71 ++++++++++++++++++++
+ arch/x86/um/asm/syscall.h          |  10 +--
+ arch/x86/um/ftrace_64.S            |  95 ++++++++++++++++++++++++++
+ arch/x86/um/x64_syscall_wrappers.c |  10 +--
+ 14 files changed, 351 insertions(+), 16 deletions(-)
+ create mode 100644 arch/um/kernel/ftrace.c
+ create mode 100644 arch/x86/um/asm/ftrace.h
+ create mode 100644 arch/x86/um/ftrace_64.S
+
+diff --git a/arch/um/Makefile b/arch/um/Makefile
+index 937639edc..94d8b1628 100644
+--- a/arch/um/Makefile
++++ b/arch/um/Makefile
+@@ -31,7 +31,12 @@ ifneq ($(filter $(SUBARCH),x86 x86_64 i386),)
+ endif
+ 
+ ifdef CONFIG_64BIT
+-	KBUILD_CFLAGS += -mcmodel=large
++	# The whole image links below 2GB and execmem bounds all module/BPF
++	# allocations to rel32 reach of _stext, so the default small code
++	# model suffices. The large model would also break DYNAMIC_FTRACE:
++	# -mfentry would emit 12-byte movabs+indirect-call sequences instead
++	# of the 5-byte calls the x86 patching machinery expects.
++	KBUILD_CFLAGS += -mcmodel=small
+ endif
+ 
+ HOST_DIR := arch/$(HEADER_ARCH)
+@@ -66,7 +71,8 @@ KBUILD_RUSTFLAGS += -Crelocation-model=pie
+ 
+ KBUILD_AFLAGS += $(ARCH_INCLUDE)
+ 
+-USER_CFLAGS = $(patsubst $(KERNEL_DEFINES),,$(patsubst -I%,,$(KBUILD_CFLAGS))) \
++USER_CFLAGS = $(filter-out $(CC_FLAGS_FTRACE),\
++		$(patsubst $(KERNEL_DEFINES),,$(patsubst -I%,,$(KBUILD_CFLAGS)))) \
+ 		$(ARCH_INCLUDE) $(MODE_INCLUDE) $(filter -I%,$(CFLAGS)) \
+ 		-D_FILE_OFFSET_BITS=64 -idirafter $(srctree)/include \
+ 		-idirafter $(objtree)/include -D__KERNEL__ -D__UM_HOST__ \
+diff --git a/arch/um/include/asm/Kbuild b/arch/um/include/asm/Kbuild
+index 8fdc0bd9a..c3586d562 100644
+--- a/arch/um/include/asm/Kbuild
++++ b/arch/um/include/asm/Kbuild
+@@ -5,7 +5,6 @@ generic-y += device.h
+ generic-y += dma-mapping.h
+ generic-y += emergency-restart.h
+ generic-y += exec.h
+-generic-y += ftrace.h
+ generic-y += hw_irq.h
+ generic-y += irq_regs.h
+ generic-y += irq_work.h
+diff --git a/arch/um/include/asm/pgtable.h b/arch/um/include/asm/pgtable.h
+index 88ea84343..4a72c7918 100644
+--- a/arch/um/include/asm/pgtable.h
++++ b/arch/um/include/asm/pgtable.h
+@@ -49,8 +49,19 @@ extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
+ #define VMALLOC_OFFSET	(__va_space)
+ #define VMALLOC_START	((high_physmem + VMALLOC_OFFSET) & ~(VMALLOC_OFFSET-1))
+ #define VMALLOC_END	(TASK_SIZE-2*PAGE_SIZE)
+-#define MODULES_VADDR	VMALLOC_START
+-#define MODULES_END	VMALLOC_END
++/*
++ * Modules and other executable allocations live in a dedicated window
++ * just below the kernel image (the mirror of native x86-64's top-2GB
++ * module area): small-code-model modules need R_X86_64_32S-reachable
++ * addresses, and patched call sites (ftrace direct calls into BPF
++ * trampolines, rel32 kfunc calls) need rel32 reach of kernel text.
++ * The window is far below TASK_SIZE and outside physmem/vmalloc, so it
++ * never collides with either; the host side of it is empty because the
++ * UML binary links at uml_physmem and host mmaps go high.
++ */
++#define MODULES_LEN	(256UL << 20)
++#define MODULES_VADDR	(uml_physmem - MODULES_LEN)
++#define MODULES_END	(uml_physmem - PAGE_SIZE)
+ 
+ #define _PAGE_TABLE	(_PAGE_PRESENT | _PAGE_RW | _PAGE_USER | _PAGE_ACCESSED | _PAGE_DIRTY)
+ #define _KERNPG_TABLE	(_PAGE_PRESENT | _PAGE_RW | _PAGE_ACCESSED | _PAGE_DIRTY)
+diff --git a/arch/um/kernel/Makefile b/arch/um/kernel/Makefile
+index be60bc451..6ae80e402 100644
+--- a/arch/um/kernel/Makefile
++++ b/arch/um/kernel/Makefile
+@@ -20,6 +20,10 @@ obj-y = config.o exec.o exitcode.o irq.o ksyms.o mem.o \
+ 	um_arch.o umid.o kmsg_dump.o capflags.o skas/
+ obj-y += load_file.o
+ 
++obj-$(CONFIG_DYNAMIC_FTRACE) += ftrace.o
++# Never trace the code that performs the patching itself.
++CFLAGS_REMOVE_ftrace.o := $(CC_FLAGS_FTRACE)
++
+ obj-$(CONFIG_BLK_DEV_INITRD) += initrd.o
+ obj-$(CONFIG_GPROF)	+= gprof_syms.o
+ obj-$(CONFIG_OF) += dtb.o
+diff --git a/arch/um/kernel/asm-offsets.c b/arch/um/kernel/asm-offsets.c
+index d620b6f6d..cc6dac102 100644
+--- a/arch/um/kernel/asm-offsets.c
++++ b/arch/um/kernel/asm-offsets.c
+@@ -18,6 +18,8 @@ void foo(void)
+ {
+ 	DEFINE(KERNEL_MADV_REMOVE, MADV_REMOVE);
+ 
++	DEFINE(UM_PT_REGS_SIZE, sizeof(struct pt_regs));
++
+ 	DEFINE(UM_KERN_PAGE_SIZE, PAGE_SIZE);
+ 	DEFINE(UM_KERN_PAGE_MASK, PAGE_MASK);
+ 	DEFINE(UM_KERN_PAGE_SHIFT, PAGE_SHIFT);
+diff --git a/arch/um/kernel/ftrace.c b/arch/um/kernel/ftrace.c
+new file mode 100644
+index 000000000..309246cf6
+--- /dev/null
++++ b/arch/um/kernel/ftrace.c
+@@ -0,0 +1,103 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Dynamic ftrace support for UML, x86_64 subarch.
++ *
++ * The UML kernel is a host process: its .text is mapped r-x by the host
++ * ELF loader, and patching it is a matter of toggling host page
++ * protections around a plain memcpy — no cross-CPU coherency dance is
++ * needed beyond the stop_machine() the ftrace core already runs for
++ * code modification.
++ */
++
++#include <linux/ftrace.h>
++#include <linux/kernel.h>
++#include <linux/memory.h>
++#include <linux/string.h>
++#include <linux/uaccess.h>
++
++#include <asm/nops.h>
++#include <os.h>
++
++static const char ftrace_nop[MCOUNT_INSN_SIZE] = { BYTES_NOP5 };
++
++union ftrace_code_union {
++	char code[MCOUNT_INSN_SIZE];
++	struct {
++		char op;
++		int offset;
++	} __packed;
++};
++
++static void ftrace_call_replace(char *code, unsigned long ip,
++				unsigned long addr)
++{
++	union ftrace_code_union calc;
++
++	calc.op = 0xe8; /* call rel32 */
++	calc.offset = (int)(addr - ip - MCOUNT_INSN_SIZE);
++	memcpy(code, calc.code, MCOUNT_INSN_SIZE);
++}
++
++/* old_code == NULL skips the expected-bytes check (unknown old target). */
++static int ftrace_poke(unsigned long ip, const char *old_code,
++		       const char *new_code)
++{
++	unsigned long page = ip & PAGE_MASK;
++	unsigned long span = PAGE_ALIGN(ip + MCOUNT_INSN_SIZE) - page;
++	char cur[MCOUNT_INSN_SIZE];
++	int err;
++
++	/* Make sure we are replacing what we think we are. */
++	if (old_code) {
++		if (copy_from_kernel_nofault(cur, (void *)ip, MCOUNT_INSN_SIZE))
++			return -EFAULT;
++		if (memcmp(cur, old_code, MCOUNT_INSN_SIZE) != 0)
++			return -EINVAL;
++	}
++
++	err = os_protect_memory((void *)page, span, 1, 1, 1);
++	if (err)
++		return err;
++	memcpy((void *)ip, new_code, MCOUNT_INSN_SIZE);
++	err = os_protect_memory((void *)page, span, 1, 0, 1);
++
++	return err;
++}
++
++int ftrace_make_nop(struct module *mod, struct dyn_ftrace *rec,
++		    unsigned long addr)
++{
++	char old[MCOUNT_INSN_SIZE];
++
++	ftrace_call_replace(old, rec->ip, addr);
++	return ftrace_poke(rec->ip, old, ftrace_nop);
++}
++
++int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
++{
++	char new[MCOUNT_INSN_SIZE];
++
++	ftrace_call_replace(new, rec->ip, addr);
++	return ftrace_poke(rec->ip, ftrace_nop, new);
++}
++
++#ifdef CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
++int ftrace_modify_call(struct dyn_ftrace *rec, unsigned long old_addr,
++		       unsigned long addr)
++{
++	char old[MCOUNT_INSN_SIZE], new[MCOUNT_INSN_SIZE];
++
++	ftrace_call_replace(old, rec->ip, old_addr);
++	ftrace_call_replace(new, rec->ip, addr);
++	return ftrace_poke(rec->ip, old, new);
++}
++#endif
++
++int ftrace_update_ftrace_func(ftrace_func_t func)
++{
++	unsigned long ip = (unsigned long)&ftrace_call;
++	char new[MCOUNT_INSN_SIZE];
++
++	ftrace_call_replace(new, ip, (unsigned long)func);
++	return ftrace_poke(ip, NULL, new);
++}
+diff --git a/arch/um/kernel/mem.c b/arch/um/kernel/mem.c
+index 1eef0e42e..cdb026694 100644
+--- a/arch/um/kernel/mem.c
++++ b/arch/um/kernel/mem.c
+@@ -10,6 +10,8 @@
+ #include <linux/swap.h>
+ #include <linux/slab.h>
+ #include <linux/init.h>
++#include <linux/execmem.h>
++#include <linux/sizes.h>
+ #include <asm/sections.h>
+ #include <asm/page.h>
+ #include <asm/pgalloc.h>
+@@ -137,3 +139,37 @@ void mark_rodata_ro(void)
+ 
+ 	os_protect_memory((void *)rodata_start, rodata_end - rodata_start, 1, 0, 0);
+ }
++
++#ifdef CONFIG_EXECMEM
++static struct execmem_info execmem_info __ro_after_init;
++
++/*
++ * All module and BPF allocations — text and data — go into the module
++ * window just below the kernel image (see MODULES_VADDR): small-model
++ * module relocations (R_X86_64_32S) and patched rel32 call sites
++ * (ftrace direct calls into BPF trampolines, kfunc calls) all require
++ * addresses reachable from kernel text; the default vmalloc range is
++ * not.
++ */
++struct execmem_info __init *execmem_arch_setup(void)
++{
++	execmem_info = (struct execmem_info){
++		.ranges = {
++			[EXECMEM_DEFAULT] = {
++				.start	= MODULES_VADDR,
++				.end	= MODULES_END,
++				.pgprot	= PAGE_KERNEL_EXEC,
++				.alignment = 1,
++			},
++			[EXECMEM_MODULE_DATA] = {
++				.start	= MODULES_VADDR,
++				.end	= MODULES_END,
++				.pgprot	= PAGE_KERNEL,
++				.alignment = 1,
++			},
++		},
++	};
++
++	return &execmem_info;
++}
++#endif
+diff --git a/arch/um/kernel/trap.c b/arch/um/kernel/trap.c
+index 177615820..dc8847ec1 100644
+--- a/arch/um/kernel/trap.c
++++ b/arch/um/kernel/trap.c
+@@ -316,7 +316,8 @@ unsigned long segv(struct faultinfo fi, unsigned long ip, int is_user,
+ 	if (!is_user && regs)
+ 		current->thread.segv_regs = container_of(regs, struct pt_regs, regs);
+ 
+-	if (!is_user && address >= start_vm && address < end_vm) {
++	if (!is_user && ((address >= start_vm && address < end_vm) ||
++			 (address >= MODULES_VADDR && address < MODULES_END))) {
+ 		/*
+ 		 * Kernel has pending updates from set_ptes that were not
+ 		 * flushed yet. Syncing them should fix the pagefault (if not
+diff --git a/arch/x86/um/Kconfig b/arch/x86/um/Kconfig
+index 7b617d450..4c86b1cc7 100644
+--- a/arch/x86/um/Kconfig
++++ b/arch/x86/um/Kconfig
+@@ -16,6 +16,12 @@ config UML_X86
+ 	select HAVE_EBPF_JIT if 64BIT
+ 	select ARCH_WANT_DEFAULT_BPF_JIT if 64BIT
+ 	select UML_SUBARCH_SUPPORTS_SMP if X86_CX8
++	select HAVE_FUNCTION_TRACER if 64BIT
++	select HAVE_DYNAMIC_FTRACE if 64BIT
++	select HAVE_DYNAMIC_FTRACE_WITH_ARGS if 64BIT
++	select HAVE_DYNAMIC_FTRACE_WITH_DIRECT_CALLS if 64BIT
++	select HAVE_FTRACE_MCOUNT_RECORD if 64BIT
++	select HAVE_FENTRY if 64BIT
+ 
+ config 64BIT
+ 	bool "64-bit kernel" if "$(SUBARCH)" = "x86"
+diff --git a/arch/x86/um/Makefile b/arch/x86/um/Makefile
+index 8bfac9ce8..76a4e37a1 100644
+--- a/arch/x86/um/Makefile
++++ b/arch/x86/um/Makefile
+@@ -27,6 +27,7 @@ subarch-y += ../kernel/sys_ia32.o
+ else
+ 
+ obj-y += mem_64.o syscalls_64.o x64_syscall_wrappers.o vdso/
++obj-$(CONFIG_FUNCTION_TRACER) += ftrace_64.o
+ 
+ subarch-y = ../lib/csum-partial_64.o ../lib/memcpy_64.o \
+ 	../lib/memmove_64.o ../lib/memset_64.o
+diff --git a/arch/x86/um/asm/ftrace.h b/arch/x86/um/asm/ftrace.h
+new file mode 100644
+index 000000000..d0c77d17b
+--- /dev/null
++++ b/arch/x86/um/asm/ftrace.h
+@@ -0,0 +1,71 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef __UM_X86_FTRACE_H
++#define __UM_X86_FTRACE_H
++
++#ifdef CONFIG_FUNCTION_TRACER
++
++#define MCOUNT_ADDR		((unsigned long)(__fentry__))
++#define MCOUNT_INSN_SIZE	5 /* sizeof mcount call */
++
++#ifdef CONFIG_DYNAMIC_FTRACE_WITH_ARGS
++#define ARCH_SUPPORTS_FTRACE_OPS 1
++#endif
++
++#ifndef __ASSEMBLER__
++#include <asm/ptrace.h>
++
++void __fentry__(void);
++
++static inline unsigned long ftrace_call_adjust(unsigned long addr)
++{
++	/*
++	 * addr is the address of the mcount call instruction; -mfentry
++	 * places it at function entry, no adjustment needed.
++	 */
++	return addr;
++}
++
++#ifdef CONFIG_DYNAMIC_FTRACE
++struct dyn_arch_ftrace {
++	/* No extra data needed */
++};
++#endif
++
++#ifdef CONFIG_DYNAMIC_FTRACE_WITH_ARGS
++/*
++ * The default pt_regs-shaped ftrace_regs from linux/ftrace_regs.h is
++ * used; ftrace_caller materializes a partial um pt_regs (argument
++ * registers, ip, sp) on the stack. It is never a complete pt_regs,
++ * so no full-regs view is offered.
++ */
++struct ftrace_regs;
++
++static __always_inline struct pt_regs *
++arch_ftrace_get_regs(struct ftrace_regs *fregs)
++{
++	return NULL;
++}
++
++#define ftrace_regs_set_instruction_pointer(fregs, _ip) \
++	(arch_ftrace_regs(fregs)->regs.regs.gp[HOST_IP] = (_ip))
++
++#ifdef CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
++/*
++ * When a direct-call ops shares an fentry site with normal ops, the
++ * dispatcher stashes the direct trampoline's address in the frame's
++ * ORIG_AX slot; ftrace_caller tail-jumps to it after the ops loop.
++ */
++static inline void
++__arch_ftrace_set_direct_caller(struct pt_regs *regs, unsigned long addr)
++{
++	regs->regs.gp[HOST_ORIG_AX] = addr;
++}
++
++#define arch_ftrace_set_direct_caller(fregs, addr) \
++	__arch_ftrace_set_direct_caller(&arch_ftrace_regs(fregs)->regs, addr)
++#endif /* CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS */
++#endif /* CONFIG_DYNAMIC_FTRACE_WITH_ARGS */
++#endif /* !__ASSEMBLER__ */
++
++#endif /* CONFIG_FUNCTION_TRACER */
++#endif /* __UM_X86_FTRACE_H */
+diff --git a/arch/x86/um/asm/syscall.h b/arch/x86/um/asm/syscall.h
+index 9a750e1f8..8e5bcf07a 100644
+--- a/arch/x86/um/asm/syscall.h
++++ b/arch/x86/um/asm/syscall.h
+@@ -13,15 +13,15 @@ extern const sys_call_ptr_t sys_call_table[];
+ 
+ struct pt_regs;
+ 
+-asmlinkage long __attribute__((patchable_function_entry(5, 0)))
++asmlinkage long
+ __x64_sys_getpgid(const struct pt_regs *regs);
+-asmlinkage long __attribute__((patchable_function_entry(5, 0)))
++asmlinkage long
+ __x64_sys_nanosleep(const struct pt_regs *regs);
+-asmlinkage long __attribute__((patchable_function_entry(5, 0)))
++asmlinkage long
+ __x64_sys_prctl(const struct pt_regs *regs);
+-asmlinkage long __attribute__((patchable_function_entry(5, 0)))
++asmlinkage long
+ __x64_sys_prlimit64(const struct pt_regs *regs);
+-asmlinkage long __attribute__((patchable_function_entry(5, 0)))
++asmlinkage long
+ __x64_sys_setdomainname(const struct pt_regs *regs);
+ 
+ static inline int syscall_get_arch(struct task_struct *task)
+diff --git a/arch/x86/um/ftrace_64.S b/arch/x86/um/ftrace_64.S
+new file mode 100644
+index 000000000..23d4e55da
+--- /dev/null
++++ b/arch/x86/um/ftrace_64.S
+@@ -0,0 +1,95 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * ftrace entry code for UML x86_64.
++ *
++ * DYNAMIC_FTRACE_WITH_ARGS flavor: ftrace_caller materializes a partial
++ * um pt_regs (argument registers, ip, sp) on the stack and calls the
++ * dispatcher with (ip, parent_ip, op, fregs). Native x86's ftrace_64.S
++ * is not reusable here — it leans on CET, %gs-based per-CPU state and
++ * ORC annotations that do not exist on UML.
++ *
++ * um pt_regs is a flat gp[] array indexed by the generated HOST_*
++ * constants, so every register slot is HOST_xx * 8 from the frame base.
++ */
++
++#include <linux/linkage.h>
++#include <generated/user_constants.h>
++#include <generated/asm-offsets.h>
++
++/* rsp is 8 (mod 16) on entry; keep the call site 16-byte aligned. */
++#define FTRACE_FRAME_SIZE	(((UM_PT_REGS_SIZE + 15) & ~15) + 8)
++
++#define SLOT(reg)		((HOST_##reg) * 8)
++
++	.code64
++
++/* All fentry sites are nopped at boot; __fentry__ itself is never live. */
++SYM_FUNC_START(__fentry__)
++	ret
++SYM_FUNC_END(__fentry__)
++EXPORT_SYMBOL(__fentry__)
++
++SYM_FUNC_START(ftrace_caller)
++	/*
++	 * Stack on entry:
++	 *   [rsp]    return address into the traced function (site ip + 5)
++	 *   [rsp+8]  traced function's return address (parent ip)
++	 */
++	subq	$FTRACE_FRAME_SIZE, %rsp
++
++	/* Preserve the traced function's argument registers plus rax
++	 * (varargs %al count); callee-saved registers are covered by the
++	 * C ABI of the dispatcher. */
++	movq	%rdi, SLOT(DI)(%rsp)
++	movq	%rsi, SLOT(SI)(%rsp)
++	movq	%rdx, SLOT(DX)(%rsp)
++	movq	%rcx, SLOT(CX)(%rsp)
++	movq	%r8,  SLOT(R8)(%rsp)
++	movq	%r9,  SLOT(R9)(%rsp)
++	movq	%rax, SLOT(AX)(%rsp)
++	movq	%rbp, SLOT(BP)(%rsp)
++
++	/* ip of the fentry site: return-into-function minus call size */
++	movq	FTRACE_FRAME_SIZE(%rsp), %rdi
++	subq	$5, %rdi
++	movq	%rdi, SLOT(IP)(%rsp)
++
++	/* sp as the uninstrumented function would see it */
++	leaq	FTRACE_FRAME_SIZE+8(%rsp), %rax
++	movq	%rax, SLOT(SP)(%rsp)
++
++	/* direct-call stash, read back after the ops loop */
++	movq	$0, SLOT(ORIG_AX)(%rsp)
++
++	movq	FTRACE_FRAME_SIZE+8(%rsp), %rsi	/* parent ip */
++	movq	function_trace_op(%rip), %rdx	/* op */
++	movq	%rsp, %rcx			/* fregs */
++
++SYM_INNER_LABEL(ftrace_call, SYM_L_GLOBAL)
++	call	ftrace_stub
++
++	/* A direct-call ops sharing this site leaves its trampoline
++	 * address in ORIG_AX; r11 is fair game at function entry. */
++	movq	SLOT(ORIG_AX)(%rsp), %r11
++
++	movq	SLOT(BP)(%rsp), %rbp
++	movq	SLOT(AX)(%rsp), %rax
++	movq	SLOT(R9)(%rsp), %r9
++	movq	SLOT(R8)(%rsp), %r8
++	movq	SLOT(CX)(%rsp), %rcx
++	movq	SLOT(DX)(%rsp), %rdx
++	movq	SLOT(SI)(%rsp), %rsi
++	movq	SLOT(DI)(%rsp), %rdi
++	addq	$FTRACE_FRAME_SIZE, %rsp
++
++	testq	%r11, %r11
++	jnz	1f
++	ret
++1:
++	/* Enter the trampoline exactly as a patched site call would. */
++	jmp	*%r11
++SYM_FUNC_END(ftrace_caller)
++
++SYM_FUNC_START(ftrace_stub)
++	ret
++SYM_FUNC_END(ftrace_stub)
+diff --git a/arch/x86/um/x64_syscall_wrappers.c b/arch/x86/um/x64_syscall_wrappers.c
+index 879fe3dea..8d3bb0086 100644
+--- a/arch/x86/um/x64_syscall_wrappers.c
++++ b/arch/x86/um/x64_syscall_wrappers.c
+@@ -28,13 +28,13 @@
+ #include <asm/syscall.h>
+ #include <sysdep/ptrace.h>
+ 
+-asmlinkage long __attribute__((patchable_function_entry(5, 0)))
++asmlinkage long
+ __x64_sys_getpgid(const struct pt_regs *regs)
+ {
+ 	return sys_getpgid((pid_t)UPT_SYSCALL_ARG1(&regs->regs));
+ }
+ 
+-asmlinkage long __attribute__((patchable_function_entry(5, 0)))
++asmlinkage long
+ __x64_sys_nanosleep(const struct pt_regs *regs)
+ {
+ 	return sys_nanosleep((struct __kernel_timespec __user *)
+@@ -43,7 +43,7 @@ __x64_sys_nanosleep(const struct pt_regs *regs)
+ 			     UPT_SYSCALL_ARG2(&regs->regs));
+ }
+ 
+-asmlinkage long __attribute__((patchable_function_entry(5, 0)))
++asmlinkage long
+ __x64_sys_prctl(const struct pt_regs *regs)
+ {
+ 	return sys_prctl((int)UPT_SYSCALL_ARG1(&regs->regs),
+@@ -53,7 +53,7 @@ __x64_sys_prctl(const struct pt_regs *regs)
+ 			 UPT_SYSCALL_ARG5(&regs->regs));
+ }
+ 
+-asmlinkage long __attribute__((patchable_function_entry(5, 0)))
++asmlinkage long
+ __x64_sys_prlimit64(const struct pt_regs *regs)
+ {
+ 	return sys_prlimit64((pid_t)UPT_SYSCALL_ARG1(&regs->regs),
+@@ -63,7 +63,7 @@ __x64_sys_prlimit64(const struct pt_regs *regs)
+ 			     (struct rlimit64 __user *)UPT_SYSCALL_ARG4(&regs->regs));
+ }
+ 
+-asmlinkage long __attribute__((patchable_function_entry(5, 0)))
++asmlinkage long
+ __x64_sys_setdomainname(const struct pt_regs *regs)
+ {
+ 	return sys_setdomainname((char __user *)UPT_SYSCALL_ARG1(&regs->regs),
+-- 
+2.43.0
+
