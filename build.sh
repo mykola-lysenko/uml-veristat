@@ -1056,6 +1056,64 @@ CONFIG_ARGS=(
     --enable  TCP_CONG_ADVANCED
     --enable  TCP_CONG_CUBIC
     --enable  TCP_CONG_DCTCP
+    # Network-env selftest family (task #5): every option below maps onto
+    # failing test clusters and comes from the official selftests config
+    # (tools/testing/selftests/bpf/config): netkit driver (tc_netkit_*),
+    # stream parser + TLS + vsock (sockmap_*), policy routing + VRF (lwt
+    # and vrf setups), VLAN offload (xdp_vlan_*), bonding (xdp_bonding),
+    # tc classifiers/actions (tc_*), seg6/ioam6/FOU lwtunnels (lwt_*,
+    # tc_tunnel), MPLS, ESP+crypto for xfrm/tunnel, BBR+MD5SIG
+    # (setget_sockopt, bpf_tcp_ca), XSK diag, netdevsim.
+    --enable  NETKIT
+    --enable  BPF_STREAM_PARSER
+    --enable  TLS
+    --enable  VSOCKETS
+    --enable  VSOCKETS_LOOPBACK
+    --enable  IP_ADVANCED_ROUTER
+    --enable  IP_MULTIPLE_TABLES
+    --enable  IP_ROUTE_MULTIPATH
+    --enable  IPV6_MULTIPLE_TABLES
+    --enable  NET_L3_MASTER_DEV
+    --enable  NET_VRF
+    --enable  VLAN_8021Q
+    --enable  BONDING
+    --enable  NET_CLS_FLOWER
+    --enable  NET_CLS_MATCHALL
+    --enable  NET_CLS_CGROUP
+    --enable  NET_ACT_GACT
+    --enable  NET_ACT_SKBMOD
+    --enable  NET_EMATCH
+    --enable  NET_TC_SKB_EXT
+    --enable  NET_SCH_FQ
+    --enable  NET_SCH_FQ_CODEL
+    --enable  NET_SCH_HTB
+    --enable  IPV6_SEG6_LWTUNNEL
+    --enable  IPV6_SEG6_BPF
+    --enable  IPV6_IOAM6_LWTUNNEL
+    --enable  NET_FOU_IP_TUNNELS
+    --enable  IPV6_FOU_TUNNEL
+    --enable  NET_IPGRE_BROADCAST
+    --enable  IPV6_ROUTER_PREF
+    --enable  IPV6_ROUTE_INFO
+    --enable  IPV6_SUBTREES
+    --enable  IPV6_MIP6
+    --enable  MPLS
+    --enable  MPLS_ROUTING
+    --enable  MPLS_IPTUNNEL
+    --enable  NET_MPLS_GSO
+    --enable  INET_ESP
+    --enable  XFRM_SUB_POLICY
+    --enable  CRYPTO_AES
+    --enable  CRYPTO_HMAC
+    --enable  CRYPTO_SEQIV
+    --enable  CRYPTO_USER_API_HASH
+    --enable  CRYPTO_USER_API_SKCIPHER
+    --enable  TCP_CONG_BBR
+    --enable  TCP_MD5SIG
+    --enable  XDP_SOCKETS_DIAG
+    --enable  NETDEVSIM
+    --enable  NETFILTER_XT_MATCH_BPF
+    --enable  NETFILTER_XT_MATCH_STATISTIC
     --enable  SMP
     --set-val NR_CPUS 8
     --enable  KALLSYMS_ALL
