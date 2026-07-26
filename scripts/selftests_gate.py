@@ -79,9 +79,9 @@ def check_pin(baseline: pathlib.Path) -> str:
     return prefix
 
 
-def run_sweep(out_dir: pathlib.Path) -> dict:
+def run_sweep(out_dir: pathlib.Path, jobs: int) -> dict:
     cmd = [sys.executable, str(ROOT / "scripts" / "run_test_chunks.py"),
-           "--out-dir", str(out_dir)]
+           "--out-dir", str(out_dir), "--jobs", str(jobs)]
     print(f"gate: running full sweep: {' '.join(cmd)}", file=sys.stderr, flush=True)
     proc = subprocess.run(cmd, stdout=sys.stderr, stderr=subprocess.STDOUT)
     if proc.returncode != 0:
@@ -143,6 +143,8 @@ def main() -> int:
                     "instead of running the sweep (implies --no-retry)")
     ap.add_argument("--out-dir", help="sweep output dir (default: timestamped "
                     "under .build/test-logs/)")
+    ap.add_argument("--jobs", type=int, default=1,
+                    help="concurrent sweep chunks (passed to run_test_chunks)")
     ap.add_argument("--no-retry", action="store_true",
                     help="fail regressions immediately, no standalone retry")
     ap.add_argument("--flaky", default=str(FLAKY_DEFAULT),
@@ -169,7 +171,7 @@ def main() -> int:
         summary = json.loads(pathlib.Path(args.summary).read_text())
     else:
         out_dir.mkdir(parents=True, exist_ok=True)
-        summary = run_sweep(out_dir)
+        summary = run_sweep(out_dir, args.jobs)
 
     timeouts = [c["index"] for c in summary.get("chunks", []) if c.get("timed_out")]
     noresult = sorted(n for n, s in summary["tests"].items() if s == "NORESULT")

@@ -11,6 +11,7 @@ test cannot sink the baseline.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import ctypes
 import json
 import os
@@ -35,6 +36,22 @@ def join_session_keyring() -> None:
             SYS_keyctl, KEYCTL_JOIN_SESSION_KEYRING, None)
     except OSError:
         pass
+
+def kill_session(sid: int) -> None:
+    """SIGKILL every process in session `sid` (start_new_session=True makes
+    the chunk runner a session leader, and UML guest processes stay in it
+    even when they escape the immediate process group)."""
+    for p in pathlib.Path("/proc").iterdir():
+        if not p.name.isdigit():
+            continue
+        try:
+            # /proc/<pid>/stat, fields after the ')': state ppid pgrp session
+            fields = (p / "stat").read_text().rsplit(")", 1)[1].split()
+            if int(fields[3]) == sid:
+                os.kill(int(p.name), signal.SIGKILL)
+        except (OSError, ValueError, IndexError):
+            pass
+
 
 RESULT_RE = re.compile(r"^#(\d+)\s+(\S+):(OK|FAIL|SKIP)\b")
 
@@ -80,8 +97,10 @@ def run_chunk(
             timed_out = True
             os.killpg(proc.pid, signal.SIGKILL)
             rc = proc.wait()
-            # A killed runner can leave the UML guest behind.
-            subprocess.run(["pkill", "-9", "-f", "/linux mem="], check=False)
+            # A killed runner can leave the UML guest behind. Kill by session
+            # id, not by name — with --jobs > 1 other chunks' guests are
+            # running and a global pkill would murder the innocent.
+            kill_session(proc.pid)
     return {
         "rc": rc,
         "timed_out": timed_out,
@@ -124,6 +143,9 @@ def main() -> int:
     ap.add_argument("--test-progs", default=str(ROOT / ".build/selftests-output/test_progs"))
     ap.add_argument("--runner", default=str(ROOT / "uml-test-progs"))
     ap.add_argument("--chunk-size", type=int, default=25)
+    ap.add_argument("--jobs", type=int, default=1,
+                    help="chunks to run concurrently, one UML guest each "
+                         "(budget UML_MEM≈1.8G of host RAM per job)")
     ap.add_argument("--chunk-timeout", type=int, default=900)
     ap.add_argument("--watchdog", type=int, default=120)
     ap.add_argument("--out-dir", default=None)
@@ -151,29 +173,35 @@ def main() -> int:
         wanted = set(args.only.split(","))
         chunks = [c for c in chunks if wanted & set(c)]
 
-    statuses: dict[str, str] = {}
-    chunk_meta = []
-    for idx, chunk in enumerate(chunks):
+    def run_one(idx: int, chunk: list[str]) -> dict:
         log_path = out_dir / f"chunk-{idx:03d}.log"
         meta = run_chunk(
             pathlib.Path(args.runner), chunk, log_path, args.watchdog, args.chunk_timeout
         )
         results, summary, last_reported = parse_log(log_path)
+        meta.update({"index": idx, "tests": len(chunk), "summary": summary,
+                     "results": results, "last_reported": last_reported})
+        state = "TIMEOUT" if meta["timed_out"] else f"rc={meta['rc']}"
+        print(f"chunk {idx:03d}/{len(chunks) - 1}: {state} "
+              f"{meta['seconds']}s {summary or ''}", flush=True)
+        return meta
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as ex:
+        chunk_meta = list(ex.map(run_one, range(len(chunks)), chunks))
+
+    # Merge in chunk-index order so results are deterministic regardless of
+    # completion order (identical to the old serial behavior).
+    statuses: dict[str, str] = {}
+    for meta, chunk in zip(chunk_meta, chunks):
         # test_progs -t matches substrings, so a chunk can report tests that
         # belong to other chunks; keep every result, first writer wins.
-        for name, status in results.items():
+        for name, status in meta.pop("results").items():
             statuses.setdefault(name, status)
         missing = [t for t in chunk if t not in statuses]
         if meta["timed_out"]:
             for t in missing:
                 statuses.setdefault(t, "NORESULT")
-        meta.update({"index": idx, "tests": len(chunk), "summary": summary,
-                     "missing": missing if meta["timed_out"] else [],
-                     "last_reported": last_reported})
-        chunk_meta.append(meta)
-        state = "TIMEOUT" if meta["timed_out"] else f"rc={meta['rc']}"
-        print(f"chunk {idx:03d}/{len(chunks) - 1}: {state} "
-              f"{meta['seconds']}s {summary or ''}", flush=True)
+        meta["missing"] = missing if meta["timed_out"] else []
 
     # Anything never reported (e.g. denylisted upstream) is marked absent.
     for t in tests:

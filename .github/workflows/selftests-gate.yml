@@ -32,17 +32,42 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Install ccache
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ccache
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          # Exact-key hits never happen twice (run_id suffix) so every run
+          # SAVES its warmed cache; restore falls back to the newest cache
+          # for the same pin/patches, then to any older gate cache.
+          key: gate-ccache-${{ hashFiles('bpf-next-commit', 'patches/**') }}-${{ github.run_id }}
+          restore-keys: |
+            gate-ccache-${{ hashFiles('bpf-next-commit', 'patches/**') }}-
+            gate-ccache-
+
       - name: Build UML kernel and selftests
         env:
           DEBIAN_FRONTEND: noninteractive
           GITHUB_TOKEN: ${{ github.token }}
+          UML_BUILD_CCACHE: 1
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 3G
         run: ./build.sh
+
+      - name: ccache stats
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: ccache -s
 
       - name: Run gate (full sweep + baseline compare)
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/selftests_gate.py | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 scripts/selftests_gate.py --jobs 3 | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sweep logs
         if: always()
