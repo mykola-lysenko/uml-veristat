@@ -1,0 +1,80 @@
+From f4f8607ed62b0f2cd132d05b8713ab52bac36479 Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Sun, 26 Jul 2026 16:26:52 -0700
+Subject: [PATCH] um: raise a self-IPI for irq_work
+
+UML had no arch_irq_work_raise(), so irq_work fell back to the timer
+tick. The BPF memory allocator refills its per-CPU caches from
+irq_work: without a prompt raise, allocation-heavy BPF programs
+(bpf_obj_new and friends) exhaust the small prefill between ticks and
+get NULL, failing every graph-datastructure selftest.
+
+Route irq_work through the existing SMP IPI machinery with a new
+UML_IPI_IRQ_WORK vector raised at the current CPU. Non-SMP builds keep
+the tick fallback (smp.o is CONFIG_SMP-only).
+
+In-guest: test_bpf_ma, linked_list, linked_list_peek, rbtree_search,
+rbtree_search_kptr and preempted_bpf_ma_op all go from FAIL to OK.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ arch/um/kernel/smp.c | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/arch/um/kernel/smp.c b/arch/um/kernel/smp.c
+index f1e52b734..25c071d2b 100644
+--- a/arch/um/kernel/smp.c
++++ b/arch/um/kernel/smp.c
+@@ -7,6 +7,7 @@
+  * Copyright (C) 2000 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
+  */
+ 
++#include <linux/irq_work.h>
+ #include <linux/sched.h>
+ #include <linux/sched/task.h>
+ #include <linux/sched/task_stack.h>
+@@ -27,6 +28,7 @@ enum {
+ 	UML_IPI_CALL_SINGLE,
+ 	UML_IPI_CALL,
+ 	UML_IPI_STOP,
++	UML_IPI_IRQ_WORK,
+ };
+ 
+ void arch_smp_send_reschedule(int cpu)
+@@ -47,6 +49,20 @@ void arch_send_call_function_ipi_mask(const struct cpumask *mask)
+ 		os_send_ipi(cpu, UML_IPI_CALL);
+ }
+ 
++#ifdef CONFIG_IRQ_WORK
++/*
++ * Without this, irq_work — which the BPF memory allocator relies on to
++ * refill its per-CPU caches — only runs from the timer tick, and
++ * allocation-heavy BPF programs exhaust the caches long before the next
++ * tick. Raise a self-IPI so pending work runs as soon as interrupts are
++ * re-enabled, matching what real architectures do.
++ */
++void arch_irq_work_raise(void)
++{
++	os_send_ipi(raw_smp_processor_id(), UML_IPI_IRQ_WORK);
++}
++#endif
++
+ void smp_send_stop(void)
+ {
+ 	int cpu, me = smp_processor_id();
+@@ -90,6 +106,12 @@ static void ipi_handler(int vector, struct uml_pt_regs *regs)
+ 			pause();
+ 		break;
+ 
++#ifdef CONFIG_IRQ_WORK
++	case UML_IPI_IRQ_WORK:
++		irq_work_run();
++		break;
++#endif
++
+ 	default:
+ 		pr_err("CPU#%d received unknown IPI (vector=%d)!\n", cpu, vector);
+ 		break;
+-- 
+2.43.0
+
