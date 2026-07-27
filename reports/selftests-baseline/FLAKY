@@ -3,3 +3,4 @@
 # in a trailing comment. Keep this list empty unless a flake has been
 # observed in CI at least twice — the gate's standalone retry already
 # absorbs one-off flakes.
+timer_mim  # duration flake since um irq_work self-IPIs (patch 0021): all asserts pass, 2us-interval timer + IPI load sometimes crosses the test_progs watchdog; OK/FAIL/FAIL on 3 standalone runs 2026-07-26
