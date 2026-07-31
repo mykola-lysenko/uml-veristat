@@ -1,0 +1,117 @@
+name: kmemleak leak hunt
+
+# Deliberately NOT part of the per-PR gate: the kmemleak kernel runs the
+# suite at ~2x wall time and leak triage does not belong in the merge
+# path. Runs nightly and on demand; see docs/kmemleak-feasibility.md.
+
+on:
+  schedule:
+    - cron: '30 8 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: kmemleak-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  leak-hunt:
+    name: Full sweep + corpus under kmemleak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install ccache
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ccache
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          # Separate namespace from the gate cache: the kmemleak config
+          # flavor invalidates most objects anyway.
+          key: kmemleak-ccache-${{ hashFiles('bpf-next-commit', 'patches/**') }}-${{ github.run_id }}
+          restore-keys: |
+            kmemleak-ccache-${{ hashFiles('bpf-next-commit', 'patches/**') }}-
+            kmemleak-ccache-
+
+      - name: Build UML kernel with kmemleak
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          GITHUB_TOKEN: ${{ github.token }}
+          UML_BUILD_CCACHE: 1
+          UML_KMEMLEAK_BUILD: 1
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 3G
+          CCACHE_COMPILERCHECK: content
+        run: ./build.sh
+
+      - name: Selftests sweep with per-chunk kmemleak scans
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/run_test_chunks.py --jobs 3 --kmemleak \
+              --out-dir .build/test-logs/kmemleak-sweep \
+              | tee sweep-output.txt
+
+      - name: Veristat corpus with kmemleak scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          UML_KMEMLEAK=1 \
+          UML_KMEMLEAK_REPORT=.build/test-logs/kmemleak-sweep/veristat.kmemleak \
+          ./uml-veristat "$HOME/.local/share/uml-veristat/selftests/"*.bpf.o \
+              > /dev/null 2> veristat-kmemleak.txt || true
+          cat veristat-kmemleak.txt
+
+      - name: Evaluate leak reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import json, pathlib, sys
+
+          total = 0
+          summary = json.loads(pathlib.Path(
+              ".build/test-logs/kmemleak-sweep/summary.json").read_text())
+          missing = 0
+          for chunk in summary["chunks"]:
+              leaks = chunk.get("kmemleak")
+              if leaks is None:
+                  missing += 1
+              else:
+                  total += leaks
+          vr = pathlib.Path(".build/test-logs/kmemleak-sweep/veristat.kmemleak")
+          vleaks = vr.read_text(errors="replace").count(
+              "unreferenced object") if vr.exists() else None
+          if vleaks:
+              total += vleaks
+
+          print(f"selftests chunks: {total - (vleaks or 0)} leak(s), "
+                f"{missing} chunk(s) without a report")
+          print(f"veristat corpus: {vleaks} leak(s)")
+          if missing == len(summary["chunks"]) or vleaks is None:
+              print("::error::kmemleak reports missing — scan pipeline broken")
+              sys.exit(1)
+          if total:
+              print(f"::error::{total} unreferenced object(s) detected")
+              sys.exit(1)
+          print("no leaks detected")
+          EOF
+
+      - name: Upload leak reports and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kmemleak-reports-${{ github.sha }}
+          path: |
+            .build/test-logs/kmemleak-sweep/
+            veristat-kmemleak.txt
+          if-no-files-found: warn
+          retention-days: 30

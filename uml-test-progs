@@ -13,6 +13,12 @@
 #   UML_MODULES      — space-separated bpf_test*.ko paths; set to "" to disable
 #   UML_MEM          — UML guest memory (default: 1792M)
 #   UML_VERBOSE      — set to 1 to show UML boot messages
+#   UML_KMEMLEAK     — set to 1 to run a kmemleak double-scan after the tests
+#                      and report leaks (kernel must be built with
+#                      UML_KMEMLEAK_BUILD=1 ./build.sh); the leak report is
+#                      printed to stderr and, if UML_KMEMLEAK_REPORT is set,
+#                      copied to that path
+#   UML_KMEMLEAK_REPORT — optional host path to copy the kmemleak report to
 #   UML_TEST_PROGS_PREFIX — optional shell command prefix for debugging
 # ==============================================================================
 
@@ -142,6 +148,8 @@ TMPDIR_UML=$(mktemp -d /tmp/uml-test-progs-XXXXXX)
 INIT_SCRIPT="${TMPDIR_UML}/init"
 RESULT_FILE="${TMPDIR_UML}/result"
 OUTPUT_FILE="${TMPDIR_UML}/output"
+KMEMLEAK="${UML_KMEMLEAK:-0}"
+KMEMLEAK_FILE="${TMPDIR_UML}/kmemleak"
 READY_FILE="${TMPDIR_UML}/gdb-ready"
 GO_FILE="${TMPDIR_UML}/gdb-go"
 UML_PID=""
@@ -243,6 +251,19 @@ if [ "\${rc}" -ne 0 ]; then
         dmesg | tail -200
     } >> ${OUTPUT_FILE} 2>&1 || true
 fi
+if [ "${KMEMLEAK}" = "1" ] && [ -e /sys/kernel/debug/kmemleak ]; then
+    {
+        # Two scans with aging sleeps: kmemleak's min_age filter hides
+        # objects younger than ~5s from the first pass.
+        echo scan > /sys/kernel/debug/kmemleak
+        sleep 7
+        echo scan > /sys/kernel/debug/kmemleak
+        sleep 7
+        cat /sys/kernel/debug/kmemleak
+        echo "===== kmemleak dmesg ====="
+        dmesg | grep 'kmemleak:' || true
+    } > ${KMEMLEAK_FILE} 2>&1 || true
+fi
 echo \${rc} > ${RESULT_FILE}
 sync
 
@@ -337,10 +358,31 @@ else
     OUTPUT_STREAMED=1
 fi
 
+report_kmemleak() {
+    if [ "${KMEMLEAK}" != "1" ]; then
+        return
+    fi
+    if [ ! -s "${KMEMLEAK_FILE}" ]; then
+        echo "uml-test-progs: kmemleak requested but no report was produced" \
+             "(kernel built without UML_KMEMLEAK_BUILD=1?)" >&2
+        return
+    fi
+    if [ -n "${UML_KMEMLEAK_REPORT:-}" ]; then
+        cp "${KMEMLEAK_FILE}" "${UML_KMEMLEAK_REPORT}"
+    fi
+    local leaks
+    leaks=$(grep -c '^unreferenced object' "${KMEMLEAK_FILE}" || true)
+    echo "uml-test-progs: kmemleak: ${leaks} unreferenced object(s)" >&2
+    if [ "${leaks}" -gt 0 ]; then
+        cat "${KMEMLEAK_FILE}" >&2
+    fi
+}
+
 if [ -f "${RESULT_FILE}" ]; then
     if [ "${OUTPUT_STREAMED}" != "1" ]; then
         [ -f "${OUTPUT_FILE}" ] && cat "${OUTPUT_FILE}"
     fi
+    report_kmemleak
     exit "$(cat "${RESULT_FILE}")"
 else
     if [ "${OUTPUT_STREAMED}" != "1" ]; then

@@ -37,6 +37,10 @@
 #              already-provisioned hosts or when sudo cannot prompt for a
 #              password (e.g. non-interactive re-runs).
 #
+#   UML_KMEMLEAK_BUILD=1  (env) Build the guest kernel with kmemleak enabled
+#              (~2x guest runtime). Pair with UML_KMEMLEAK=1 on uml-test-progs
+#              or uml-veristat to scan for leaks after a run.
+#
 # Requirements:
 #   ~5 GB free disk space (~35 GB with --llvm-source),
 #   8+ CPU cores recommended, sudo for package install unless running as root.
@@ -1142,6 +1146,22 @@ CONFIG_ARGS=(
     --disable STACK_TRACER
     --disable FUNCTION_PROFILER
 )
+
+# Optional kmemleak build flavor (UML_KMEMLEAK_BUILD=1): ~2x guest runtime,
+# used by the kmemleak CI job and UML_KMEMLEAK=1 wrapper runs — see
+# docs/kmemleak-feasibility.md. The explicit --disable in the default branch
+# matters: .config persists across runs, so a previous kmemleak build would
+# otherwise silently keep its 2x overhead.
+if [ "${UML_KMEMLEAK_BUILD:-0}" = "1" ]; then
+    CONFIG_ARGS+=(
+        --enable  DEBUG_KMEMLEAK
+        --disable DEBUG_KMEMLEAK_DEFAULT_OFF
+        --set-val DEBUG_KMEMLEAK_MEM_POOL_SIZE 40000
+        --disable DEBUG_KMEMLEAK_AUTO_SCAN
+    )
+else
+    CONFIG_ARGS+=( --disable DEBUG_KMEMLEAK )
+fi
 scripts/config "${CONFIG_ARGS[@]}"
 
 # Re-run olddefconfig to resolve any new dependencies introduced above.
