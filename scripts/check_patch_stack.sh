@@ -14,6 +14,7 @@ CHECKPATCH="${CHECKPATCH:-}"
 PATCH_STACK_DIRS=(
 	"${PATCHES_DIR}/uml-veristat"
 	"${PATCHES_DIR}/bpf-selftests-uml"
+	"${PATCHES_DIR}/test-coverage"
 )
 
 if [ ! -d "${PATCHES_DIR}" ]; then

@@ -6,6 +6,12 @@ automatically using `git am` (idempotent: already-applied patches are skipped).
 
 The stack is split by purpose:
 
+- `test-coverage/` — flavor-only instrumentation (gcov markers for the BPF
+  subsystem dirs); NOT part of the regular stack, applied only by
+  `UML_GCOV_BUILD=1 ./build.sh` for coverage runs
+  (`scripts/bpf_coverage.py`).
+
+
 - `uml-veristat/`: base stack for building and running `uml-veristat` on UML.
   This includes shared UML verifier/JIT support and generic kernel-side BPF
   fixes.
