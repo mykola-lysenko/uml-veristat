@@ -77,6 +77,7 @@ def run_chunk(
     log_path: pathlib.Path,
     watchdog: int,
     timeout: int,
+    kmemleak_report: pathlib.Path | None = None,
 ) -> dict:
     cmd = [
         str(runner),
@@ -85,11 +86,17 @@ def run_chunk(
         "-t",
         ",".join(tests),
     ]
+    env = None
+    if kmemleak_report is not None:
+        env = os.environ.copy()
+        env["UML_KMEMLEAK"] = "1"
+        env["UML_KMEMLEAK_REPORT"] = str(kmemleak_report)
     started = time.time()
     timed_out = False
     with open(log_path, "w") as log:
         proc = subprocess.Popen(
-            cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
+            cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+            env=env,
         )
         try:
             rc = proc.wait(timeout=timeout)
@@ -146,6 +153,11 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=1,
                     help="chunks to run concurrently, one UML guest each "
                          "(budget UML_MEM≈1.8G of host RAM per job)")
+    ap.add_argument("--kmemleak", action="store_true",
+                    help="run a kmemleak scan in each chunk's guest (kernel "
+                         "must be built with UML_KMEMLEAK_BUILD=1); per-chunk "
+                         "reports land next to the chunk logs and leak counts "
+                         "go into summary.json")
     ap.add_argument("--chunk-timeout", type=int, default=1800,
                     help="host-side kill timeout per chunk; sized ~4x the "
                          "slowest known chunk (the timer suite runs minutes "
@@ -179,15 +191,27 @@ def main() -> int:
 
     def run_one(idx: int, chunk: list[str]) -> dict:
         log_path = out_dir / f"chunk-{idx:03d}.log"
+        kmemleak_report = (
+            out_dir / f"chunk-{idx:03d}.kmemleak" if args.kmemleak else None
+        )
         meta = run_chunk(
-            pathlib.Path(args.runner), chunk, log_path, args.watchdog, args.chunk_timeout
+            pathlib.Path(args.runner), chunk, log_path, args.watchdog,
+            args.chunk_timeout, kmemleak_report=kmemleak_report,
         )
         results, summary, last_reported = parse_log(log_path)
         meta.update({"index": idx, "tests": len(chunk), "summary": summary,
                      "results": results, "last_reported": last_reported})
+        leak_note = ""
+        if args.kmemleak:
+            leaks = None
+            if kmemleak_report is not None and kmemleak_report.exists():
+                leaks = kmemleak_report.read_text(errors="replace").count(
+                    "unreferenced object")
+            meta["kmemleak"] = leaks
+            leak_note = f" kmemleak={leaks}"
         state = "TIMEOUT" if meta["timed_out"] else f"rc={meta['rc']}"
         print(f"chunk {idx:03d}/{len(chunks) - 1}: {state} "
-              f"{meta['seconds']}s {summary or ''}", flush=True)
+              f"{meta['seconds']}s {summary or ''}{leak_note}", flush=True)
         return meta
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as ex:
@@ -232,6 +256,14 @@ def main() -> int:
                 f.writelines(f"- {n}\n" for n in names)
     print(f"\nwrote {out_dir}/summary.json and summary.md")
     print("counts:", json.dumps(counts))
+    if args.kmemleak:
+        per_chunk = [m.get("kmemleak") for m in chunk_meta]
+        missing = sum(1 for v in per_chunk if v is None)
+        total = sum(v for v in per_chunk if v)
+        print(f"kmemleak: {total} unreferenced object(s) across "
+              f"{len(chunk_meta)} chunks"
+              + (f" ({missing} chunk(s) produced no report — kernel built "
+                 f"without UML_KMEMLEAK_BUILD=1?)" if missing else ""))
     return 0
 
 
