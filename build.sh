@@ -41,6 +41,10 @@
 #              (~2x guest runtime). Pair with UML_KMEMLEAK=1 on uml-test-progs
 #              or uml-veristat to scan for leaks after a run.
 #
+#   UML_GCOV_BUILD=1  (env) Build with gcov coverage for the BPF subsystem
+#              dirs only (patch 0022). Collect/report with
+#              scripts/bpf_coverage.py {run,sweep,report}.
+#
 # Requirements:
 #   ~5 GB free disk space (~35 GB with --llvm-source),
 #   8+ CPU cores recommended, sudo for package install unless running as root.
@@ -1161,6 +1165,15 @@ if [ "${UML_KMEMLEAK_BUILD:-0}" = "1" ]; then
     )
 else
     CONFIG_ARGS+=( --disable DEBUG_KMEMLEAK )
+fi
+
+# Optional BPF-coverage flavor (UML_GCOV_BUILD=1): patch 0022 marks the BPF
+# subsystem dirs for gcov, so only they are instrumented. Collect and report
+# with scripts/bpf_coverage.py. Same persistent-.config hygiene as kmemleak.
+if [ "${UML_GCOV_BUILD:-0}" = "1" ]; then
+    CONFIG_ARGS+=( --enable GCOV_KERNEL --disable GCOV_PROFILE_ALL )
+else
+    CONFIG_ARGS+=( --disable GCOV_KERNEL )
 fi
 scripts/config "${CONFIG_ARGS[@]}"
 

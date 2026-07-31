@@ -1,0 +1,94 @@
+From 384418c797a67d66a2f795e076f0e7eae86ffc0b Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Fri, 31 Jul 2026 14:52:22 -0700
+Subject: [PATCH] kbuild: gcov-instrument the BPF subsystem directories
+
+Add GCOV_PROFILE markers for kernel/bpf, net/bpf, the x86 BPF JIT,
+bpf_trace, the BPF-relevant net/core objects (filter, sock_map, skmsg,
+xdp) and net/xdp. Inert unless CONFIG_GCOV_KERNEL is enabled, so stock
+builds are unaffected; with it, scripts/bpf_coverage.py in the
+uml-veristat harness collects per-chunk counters from the UML guest and
+reports line/function coverage plus never-executed functions.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ arch/x86/net/Makefile | 2 ++
+ kernel/bpf/Makefile   | 2 ++
+ kernel/trace/Makefile | 2 ++
+ net/bpf/Makefile      | 2 ++
+ net/core/Makefile     | 5 +++++
+ net/xdp/Makefile      | 2 ++
+ 6 files changed, 15 insertions(+)
+
+diff --git a/arch/x86/net/Makefile b/arch/x86/net/Makefile
+index dddbefc0f..0cc570006 100644
+--- a/arch/x86/net/Makefile
++++ b/arch/x86/net/Makefile
+@@ -1,4 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0-only
++# BPF coverage instrumentation (inert without CONFIG_GCOV_KERNEL)
++GCOV_PROFILE := y
+ #
+ # Arch-specific network modules
+ #
+diff --git a/kernel/bpf/Makefile b/kernel/bpf/Makefile
+index 4dc41bf57..1a9bc65ad 100644
+--- a/kernel/bpf/Makefile
++++ b/kernel/bpf/Makefile
+@@ -1,4 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
++# BPF coverage instrumentation (inert without CONFIG_GCOV_KERNEL)
++GCOV_PROFILE := y
+ obj-y := core.o
+ ifneq ($(CONFIG_BPF_JIT_ALWAYS_ON),y)
+ # ___bpf_prog_run() needs GCSE disabled on x86; see 3193c0836f203 for details
+diff --git a/kernel/trace/Makefile b/kernel/trace/Makefile
+index f934ff586..1bbd2d23a 100644
+--- a/kernel/trace/Makefile
++++ b/kernel/trace/Makefile
+@@ -1,4 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
++# BPF coverage instrumentation (inert without CONFIG_GCOV_KERNEL)
++GCOV_PROFILE_bpf_trace.o := y
+ 
+ # Do not instrument the tracer itself:
+ 
+diff --git a/net/bpf/Makefile b/net/bpf/Makefile
+index 1ebe270bd..69a9fe220 100644
+--- a/net/bpf/Makefile
++++ b/net/bpf/Makefile
+@@ -1,4 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0-only
++# BPF coverage instrumentation (inert without CONFIG_GCOV_KERNEL)
++GCOV_PROFILE := y
+ obj-$(CONFIG_BPF_SYSCALL)	:= test_run.o
+ ifeq ($(CONFIG_BPF_JIT),y)
+ obj-$(CONFIG_BPF_SYSCALL)	+= bpf_dummy_struct_ops.o
+diff --git a/net/core/Makefile b/net/core/Makefile
+index b3fdcb4e3..2f75bbb8f 100644
+--- a/net/core/Makefile
++++ b/net/core/Makefile
+@@ -1,4 +1,9 @@
+ # SPDX-License-Identifier: GPL-2.0
++# BPF coverage instrumentation (inert without CONFIG_GCOV_KERNEL)
++GCOV_PROFILE_filter.o := y
++GCOV_PROFILE_sock_map.o := y
++GCOV_PROFILE_skmsg.o := y
++GCOV_PROFILE_xdp.o := y
+ #
+ # Makefile for the Linux networking core.
+ #
+diff --git a/net/xdp/Makefile b/net/xdp/Makefile
+index 30cdc4315..c7240c50e 100644
+--- a/net/xdp/Makefile
++++ b/net/xdp/Makefile
+@@ -1,4 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0-only
++# BPF coverage instrumentation (inert without CONFIG_GCOV_KERNEL)
++GCOV_PROFILE := y
+ obj-$(CONFIG_XDP_SOCKETS) += xsk.o xdp_umem.o xsk_queue.o xskmap.o
+ obj-$(CONFIG_XDP_SOCKETS) += xsk_buff_pool.o
+ obj-$(CONFIG_XDP_SOCKETS_DIAG) += xsk_diag.o
+-- 
+2.43.0
+
