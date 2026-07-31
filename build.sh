@@ -844,6 +844,12 @@ PATCH_STACK_DIRS=(
     "${PATCHES_DIR}/uml-veristat"
     "${PATCHES_DIR}/bpf-selftests-uml"
 )
+# Flavor-only patches: never part of the regular stack. The test-coverage
+# dir carries the gcov instrumentation markers and is applied only when
+# building the coverage flavor (UML_GCOV_BUILD=1).
+if [ "${UML_GCOV_BUILD:-0}" = "1" ]; then
+    PATCH_STACK_DIRS+=( "${PATCHES_DIR}/test-coverage" )
+fi
 
 collect_patch_files() {
     PATCH_FILES=()
