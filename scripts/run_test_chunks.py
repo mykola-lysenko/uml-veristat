@@ -146,7 +146,11 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=1,
                     help="chunks to run concurrently, one UML guest each "
                          "(budget UML_MEM≈1.8G of host RAM per job)")
-    ap.add_argument("--chunk-timeout", type=int, default=900)
+    ap.add_argument("--chunk-timeout", type=int, default=1800,
+                    help="host-side kill timeout per chunk; sized ~4x the "
+                         "slowest known chunk (the timer suite runs minutes "
+                         "on its own) so runner variance cannot masquerade "
+                         "as a hang")
     ap.add_argument("--watchdog", type=int, default=120)
     ap.add_argument("--out-dir", default=None)
     ap.add_argument("--only", help="comma list: run only chunks containing these tests")

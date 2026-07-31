@@ -147,6 +147,7 @@ GO_FILE="${TMPDIR_UML}/gdb-go"
 UML_PID=""
 CLEANED_UP=0
 OUTPUT_DUMPED=0
+OUTPUT_STREAMED=0
 
 cleanup() {
     if [ "${CLEANED_UP}" = "1" ]; then
@@ -324,15 +325,27 @@ else
             2>/dev/null
     ) 2>/dev/null &
     UML_PID=$!
+    # Stream test output live: if the wrapper is killed by a harness
+    # timeout, the partial log is what makes the hang attributable
+    # (an empty log looks like a boot hang regardless of the real cause).
+    touch "${OUTPUT_FILE}"
+    tail --pid="${UML_PID}" -n +1 -F "${OUTPUT_FILE}" 2>/dev/null &
+    TAIL_PID=$!
     wait "${UML_PID}" 2>/dev/null || UML_EXIT=$?
     UML_PID=""
+    wait "${TAIL_PID}" 2>/dev/null || true
+    OUTPUT_STREAMED=1
 fi
 
 if [ -f "${RESULT_FILE}" ]; then
-    [ -f "${OUTPUT_FILE}" ] && cat "${OUTPUT_FILE}"
+    if [ "${OUTPUT_STREAMED}" != "1" ]; then
+        [ -f "${OUTPUT_FILE}" ] && cat "${OUTPUT_FILE}"
+    fi
     exit "$(cat "${RESULT_FILE}")"
 else
-    [ -f "${OUTPUT_FILE}" ] && cat "${OUTPUT_FILE}" >&2
+    if [ "${OUTPUT_STREAMED}" != "1" ]; then
+        [ -f "${OUTPUT_FILE}" ] && cat "${OUTPUT_FILE}" >&2
+    fi
     echo "uml-test-progs: UML guest did not complete normally (UML exit ${UML_EXIT})." >&2
     exit 1
 fi
