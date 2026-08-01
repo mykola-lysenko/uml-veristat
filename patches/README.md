@@ -545,6 +545,30 @@ BPF_LSM becomes available, and the entire 0002 stub layer is obsolete.
 
 ---
 
+## Patch 0025 — um: implement copy_from_kernel_nofault_allowed
+
+**Files:** `arch/um/kernel/maccess.c` (new), `arch/um/kernel/Makefile`
+
+**Problem:** UML never implemented `copy_from_kernel_nofault_allowed()`,
+so the generic weak version accepts every address. A kernel-nofault read
+of a guest-user address silently reads user memory as if it were kernel
+memory, and probing NULL faults into `-EFAULT` where range-checking
+callers are documented to return `-ERANGE`. The BPF string kfuncs expose
+this directly: every NULL-pointer subtest of `string_kfuncs` observed
+`-EFAULT` instead of `-ERANGE` (same signature as the `cpumask`
+`-14 vs -34` triage note).
+
+**Fix:** reject addresses below `min(MODULES_VADDR, uml_physmem)` — the
+module window and kernel image base (`uml_physmem` is `__binary_start`).
+Higher addresses are accepted the way other architectures accept their
+whole kernel half: unmapped ones fault and resolve to `-EFAULT` through
+the nofault fixup path, which keeps `(char *)-1` (the BPF selftests'
+canonical unmapped kernel pointer: `string_kfuncs` pagefault group,
+`varlen`, `verifier_bits_iter`) behaving as on x86. A both-sides
+bounded span (`< end_vm`) was tried first and broke those tests plus
+`xdp_attach`'s tracepoint-context reads. Coverage-driven find
+(helpers.c cold-function triage); upstream-ready for linux-um.
+
 ## test-coverage/ patches (coverage campaign, upstream-destined)
 
 ### 0021 — `selftests/bpf: exercise the bpf_prog object iterator end to end`

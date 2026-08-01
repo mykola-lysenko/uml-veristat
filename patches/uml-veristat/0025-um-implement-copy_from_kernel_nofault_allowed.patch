@@ -1,0 +1,92 @@
+From ca32deb40bdb8a615c5b7b32f1a8b32a852f17b6 Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Sat, 1 Aug 2026 11:44:21 -0700
+Subject: [PATCH] um: implement copy_from_kernel_nofault_allowed
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+UML never provided an implementation of
+copy_from_kernel_nofault_allowed(), so the generic weak version accepts
+every address. On UML that is wrong for the low part of the address
+space: the kernel shares the host process's address space, and a
+kernel-nofault read of NULL or of a low guest-userspace address either
+faults into -EFAULT where range-checking callers are documented to
+reject the address, or worse, silently succeeds and reads user memory
+as if it were kernel memory.
+
+The BPF string kfuncs expose the difference directly: bpf_strcmp() and
+friends return -ERANGE for strings outside the kernel address space
+(via copy_from_kernel_nofault_allowed) and -EFAULT only for faults
+inside it. On UML every NULL-pointer subtest of the string_kfuncs
+selftest observed -EFAULT instead of -ERANGE.
+
+Reject addresses below the kernel: the lowest kernel region is the
+module/execmem window when it sits below the image, otherwise
+uml_physmem, which is the base of the kernel binary (uml_physmem =
+__binary_start). Higher addresses are accepted the same way other
+architectures accept their entire kernel half: an access to an unmapped
+one faults and resolves to -EFAULT through the existing nofault fixup
+path. This keeps (char *)-1 — used by several BPF selftests as the
+canonical unmapped kernel pointer — behaving like it does on x86.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ arch/um/kernel/Makefile  |  2 +-
+ arch/um/kernel/maccess.c | 31 +++++++++++++++++++++++++++++++
+ 2 files changed, 32 insertions(+), 1 deletion(-)
+ create mode 100644 arch/um/kernel/maccess.c
+
+diff --git a/arch/um/kernel/Makefile b/arch/um/kernel/Makefile
+index 6ae80e402..6d1e3507c 100644
+--- a/arch/um/kernel/Makefile
++++ b/arch/um/kernel/Makefile
+@@ -14,7 +14,7 @@ CPPFLAGS_vmlinux.lds := -DSTART=$(LDS_START)		\
+ 			$(LDS_EXTRA)
+ always-$(KBUILD_BUILTIN) := vmlinux.lds
+ 
+-obj-y = config.o exec.o exitcode.o irq.o ksyms.o mem.o \
++obj-y = config.o exec.o exitcode.o irq.o ksyms.o maccess.o mem.o \
+ 	physmem.o process.o ptrace.o reboot.o sigio.o \
+ 	signal.o sysrq.o time.o tlb.o trap.o \
+ 	um_arch.o umid.o kmsg_dump.o capflags.o skas/
+diff --git a/arch/um/kernel/maccess.c b/arch/um/kernel/maccess.c
+new file mode 100644
+index 000000000..8faa27337
+--- /dev/null
++++ b/arch/um/kernel/maccess.c
+@@ -0,0 +1,31 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Kernel-nofault access bounds for UML.
++ */
++
++#include <linux/uaccess.h>
++#include <linux/kernel.h>
++#include <linux/pgtable.h>
++#include <as-layout.h>
++
++bool copy_from_kernel_nofault_allowed(const void *unsafe_src, size_t size)
++{
++	unsigned long vaddr = (unsigned long)unsafe_src;
++
++	/*
++	 * The UML kernel lives inside the host process's address space,
++	 * starting at uml_physmem (the base of the kernel image) with
++	 * the module/execmem window immediately below it. Everything
++	 * underneath that — NULL, the guest-userspace range — is not
++	 * kernel memory and must be rejected up front: without this
++	 * check the generic weak implementation accepts any address,
++	 * so probing NULL faults into -EFAULT instead of being
++	 * rejected, and probing a low guest-userspace address silently
++	 * reads user memory as if it were kernel memory.
++	 *
++	 * Higher addresses are accepted like other architectures accept
++	 * their whole kernel half: an access to an unmapped one faults
++	 * and resolves to -EFAULT through the nofault fixup path.
++	 */
++	return vaddr >= min(MODULES_VADDR, uml_physmem);
++}
+-- 
+2.43.0
+
