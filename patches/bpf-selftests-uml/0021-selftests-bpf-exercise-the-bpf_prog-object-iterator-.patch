@@ -1,0 +1,149 @@
+From f92a7319a25c30e262459680837e47a09673d8cf Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Fri, 31 Jul 2026 16:30:52 -0700
+Subject: [PATCH] selftests/bpf: exercise the bpf_prog object iterator end to
+ end
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Coverage measurement against the BPF selftests showed
+kernel/bpf/prog_iter.c almost entirely unexecuted: no selftest program
+attaches to the bpf_prog iterator target, so its whole seq machinery
+(start/next/show/stop) was never run — unlike the bpf_map and bpf_link
+iterators, which test_bpf_map/test_link_iter already read.
+
+Add a bpf_prog iterator program and a bpf_iter subtest that attaches
+it, reads the full dump, and asserts the iterator enumerated at least
+itself (matching by prog id fetched from the loaded program). Reading
+the iterator link's fdinfo on the way exercises the iter show_fdinfo
+path and checks the reported target name.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ .../selftests/bpf/prog_tests/bpf_iter.c       | 58 +++++++++++++++++++
+ .../selftests/bpf/progs/bpf_iter_bpf_prog.c   | 29 ++++++++++
+ 2 files changed, 87 insertions(+)
+ create mode 100644 tools/testing/selftests/bpf/progs/bpf_iter_bpf_prog.c
+
+diff --git a/tools/testing/selftests/bpf/prog_tests/bpf_iter.c b/tools/testing/selftests/bpf/prog_tests/bpf_iter.c
+index c69080ca1..0b4f7c62f 100644
+--- a/tools/testing/selftests/bpf/prog_tests/bpf_iter.c
++++ b/tools/testing/selftests/bpf/prog_tests/bpf_iter.c
+@@ -7,6 +7,7 @@
+ #include "bpf_iter_ipv6_route.skel.h"
+ #include "bpf_iter_netlink.skel.h"
+ #include "bpf_iter_bpf_map.skel.h"
++#include "bpf_iter_bpf_prog.skel.h"
+ #include "bpf_iter_tasks.skel.h"
+ #include "bpf_iter_task_stack.skel.h"
+ #include "bpf_iter_task_file.skel.h"
+@@ -174,6 +175,61 @@ static void test_bpf_map(void)
+ 	bpf_iter_bpf_map__destroy(skel);
+ }
+ 
++static void test_bpf_prog(void)
++{
++	struct bpf_iter_bpf_prog *skel;
++	struct bpf_prog_info info = {};
++	__u32 info_len = sizeof(info);
++	char fdinfo_path[64], fdinfo_buf[512] = {};
++	struct bpf_link *link;
++	char buf[16] = {};
++	int iter_fd, fdinfo_fd, len, err;
++
++	skel = bpf_iter_bpf_prog__open_and_load();
++	if (!ASSERT_OK_PTR(skel, "bpf_iter_bpf_prog__open_and_load"))
++		return;
++
++	/* the iterator must at least enumerate the program running it */
++	err = bpf_prog_get_info_by_fd(bpf_program__fd(skel->progs.dump_bpf_prog),
++				      &info, &info_len);
++	if (!ASSERT_OK(err, "prog_info"))
++		goto out;
++	skel->bss->wanted_id = info.id;
++
++	link = bpf_program__attach_iter(skel->progs.dump_bpf_prog, NULL);
++	if (!ASSERT_OK_PTR(link, "attach_iter"))
++		goto out;
++
++	/* reading the link's fdinfo walks the iter show_fdinfo path */
++	snprintf(fdinfo_path, sizeof(fdinfo_path), "/proc/self/fdinfo/%d",
++		 bpf_link__fd(link));
++	fdinfo_fd = open(fdinfo_path, O_RDONLY);
++	if (ASSERT_GE(fdinfo_fd, 0, "open_fdinfo")) {
++		len = read(fdinfo_fd, fdinfo_buf, sizeof(fdinfo_buf) - 1);
++		close(fdinfo_fd);
++		if (ASSERT_GT(len, 0, "read_fdinfo"))
++			ASSERT_OK_PTR(strstr(fdinfo_buf, "bpf_prog"),
++				      "fdinfo_target_name");
++	}
++
++	iter_fd = bpf_iter_create(bpf_link__fd(link));
++	if (!ASSERT_GE(iter_fd, 0, "create_iter"))
++		goto free_link;
++
++	while ((len = read(iter_fd, buf, sizeof(buf))) > 0)
++		;
++	ASSERT_GE(len, 0, "read");
++	close(iter_fd);
++
++	ASSERT_GE(skel->bss->seen_progs, 1, "seen_progs");
++	ASSERT_TRUE(skel->bss->found_wanted, "found_own_prog");
++
++free_link:
++	bpf_link__destroy(link);
++out:
++	bpf_iter_bpf_prog__destroy(skel);
++}
++
+ static void check_bpf_link_info(const struct bpf_program *prog)
+ {
+ 	LIBBPF_OPTS(bpf_iter_attach_opts, opts);
+@@ -1724,6 +1780,8 @@ void test_bpf_iter(void)
+ 		test_netlink();
+ 	if (test__start_subtest("bpf_map"))
+ 		test_bpf_map();
++	if (test__start_subtest("bpf_prog"))
++		test_bpf_prog();
+ 	if (test__start_subtest("task_tid"))
+ 		test_task_tid();
+ 	if (test__start_subtest("task_pid"))
+diff --git a/tools/testing/selftests/bpf/progs/bpf_iter_bpf_prog.c b/tools/testing/selftests/bpf/progs/bpf_iter_bpf_prog.c
+new file mode 100644
+index 000000000..924be6f1f
+--- /dev/null
++++ b/tools/testing/selftests/bpf/progs/bpf_iter_bpf_prog.c
+@@ -0,0 +1,29 @@
++// SPDX-License-Identifier: GPL-2.0
++/* Copyright (c) 2026 Meta Platforms, Inc. and affiliates. */
++#include <vmlinux.h>
++#include <bpf/bpf_helpers.h>
++
++char _license[] SEC("license") = "GPL";
++
++__u32 wanted_id;
++__u32 seen_progs;
++bool found_wanted;
++
++SEC("iter/bpf_prog")
++int dump_bpf_prog(struct bpf_iter__bpf_prog *ctx)
++{
++	struct seq_file *seq = ctx->meta->seq;
++	struct bpf_prog *prog = ctx->prog;
++	struct bpf_prog_aux *aux;
++
++	if (!prog)
++		return 0;
++
++	aux = prog->aux;
++	seen_progs++;
++	if (aux->id == wanted_id)
++		found_wanted = true;
++
++	BPF_SEQ_PRINTF(seq, "%8u %s\n", aux->id, aux->name);
++	return 0;
++}
+-- 
+2.43.0
+
