@@ -6,12 +6,6 @@ automatically using `git am` (idempotent: already-applied patches are skipped).
 
 The stack is split by purpose:
 
-- `test-coverage/` — flavor-only instrumentation (gcov markers for the BPF
-  subsystem dirs); NOT part of the regular stack, applied only by
-  `UML_GCOV_BUILD=1 ./build.sh` for coverage runs
-  (`scripts/bpf_coverage.py`).
-
-
 - `uml-veristat/`: base stack for building and running `uml-veristat` on UML.
   This includes shared UML verifier/JIT support and generic kernel-side BPF
   fixes.
@@ -19,9 +13,16 @@ The stack is split by purpose:
   support applied after the base stack. Put new patches here when they touch
   `tools/testing/selftests/bpf` or are only needed for runtime BPF selftests
   on UML.
+- `test-coverage/`: the coverage campaign's upstream-destined material —
+  coverage-driven new selftests, selftests build-dependency fixes, and the
+  gcov instrumentation markers for the BPF subsystem dirs. The gcov markers
+  are inert unless `CONFIG_GCOV_KERNEL` is enabled
+  (`UML_GCOV_BUILD=1 ./build.sh`, reported via `scripts/bpf_coverage.py`);
+  everything else in the folder is generic mainline-facing work that also
+  runs in the regular stack.
 
-`build.sh` applies both folders by default, in that order. The split is
-organizational; the full package and CI path still uses both folders unless
+`build.sh` applies all three folders by default, in that order. The split is
+organizational; the full package and CI path still uses every folder unless
 `--clean` or `--skip-patches` is requested.
 
 ## Patches
@@ -543,6 +544,48 @@ selected transitively.
 BPF_LSM becomes available, and the entire 0002 stub layer is obsolete.
 
 ---
+
+## test-coverage/ patches (coverage campaign, upstream-destined)
+
+### 0021 — `selftests/bpf: exercise the bpf_prog object iterator end to end`
+
+Coverage-driven selftest: drives `kernel/bpf/prog_iter.c` from 8.3% to
+94.4% line coverage by iterating loaded programs through a
+`bpf_iter/bpf_prog` program (anonymous + pinned iterators, read sizes,
+seq_num/session semantics). Generic mainline test, no UML dependency.
+
+### 0022 — `kbuild: gcov-instrument the BPF subsystem directories`
+
+`GCOV_PROFILE := y` markers for `kernel/bpf`, `net/bpf`, the x86 BPF JIT,
+`kernel/trace` (bpf_trace), the BPF-relevant `net/core` objects and
+`net/xdp`. Inert unless `CONFIG_GCOV_KERNEL` is enabled
+(`UML_GCOV_BUILD=1`); the coverage harness is `scripts/bpf_coverage.py`.
+
+### 0023 — `selftests/bpf: track test object skeleton deps with per-flavor paths`
+
+**Problem:** test objects compile from inside `TRUNNER_OUTPUT` with `-I.`,
+so `%.test.d` records generated skeletons as bare basenames; the global
+vpath directives then resolve every flavor's skeleton dependency to the
+*parent* flavor's copy (first vpath dir wins). Flavored test objects go
+stale when only their own skeleton regenerates — for signed lskels that
+surfaces as runtime `-ENOKEY` with no build-time diagnostic (the
+three-week ENOKEY epic; 822 of 1,307 `*.test.d` files in the rig also had
+fully detached dependency edges after the repo relocation).
+
+**Fix:** compile with `-I$(abspath $(TRUNNER_OUTPUT))` so each flavor's
+`.test.d` records true per-flavor paths, and add `-MP` so deleted or
+renamed headers trigger a rebuild instead of a hard make error. The
+companion rig-side relocation guard lives in `build.sh` (purges `.test.d`
+files whose recorded target left the current output dir).
+
+### 0024 — `selftests/bpf: regenerate signed lskels when the signing key changes`
+
+**Problem:** the signed-lskel rule depends only on `%.bpf.o` and bpftool;
+regenerating `tools/build/signing_key.*` leaves signed skeletons carrying
+signatures made with the old key → `-ENOKEY` at load.
+
+**Fix:** add `$(PRIVATE_KEY)` and `$(VERIFICATION_CERT)` as real
+prerequisites.
 
 ## Verification Notes
 
