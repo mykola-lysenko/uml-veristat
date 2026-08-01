@@ -1347,8 +1347,12 @@ info "bpftool: ${BPFTOOL_BIN}"
 VERISTAT_BIN="${SELFTESTS_OUTPUT}/veristat"
 TEST_PROGS_BIN="${SELFTESTS_OUTPUT}/test_progs"
 
+# KERNEL_TREE_CHANGED also forces this step: newly applied stack patches can
+# touch selftests sources, and skipping the (incremental) make here would run
+# tests against binaries built from the pre-patch tree.
 if [ ! -x "${VERISTAT_BIN}" ] || [ ! -x "${TEST_PROGS_BIN}" ] || \
-   [ "${DO_UPDATE}" = "1" ] || [ "${REBUILD_SELFTESTS}" = "1" ]; then
+   [ "${DO_UPDATE}" = "1" ] || [ "${REBUILD_SELFTESTS}" = "1" ] || \
+   [ "${KERNEL_TREE_CHANGED}" = "1" ]; then
     info "Building all BPF selftests (veristat, test_progs, .bpf.o progs)..."
     # -k plus BPF_STRICT_BUILD=0: keep going on errors so that
     # UML-incompatible or upstream-drifting selftests do not abort the whole
