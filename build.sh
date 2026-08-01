@@ -42,8 +42,9 @@
 #              or uml-veristat to scan for leaks after a run.
 #
 #   UML_GCOV_BUILD=1  (env) Build with gcov coverage for the BPF subsystem
-#              dirs only (patch 0022). Collect/report with
-#              scripts/bpf_coverage.py {run,sweep,report}.
+#              dirs only (enables CONFIG_GCOV_KERNEL; the patch 0022 gcov
+#              markers are always applied but inert without it). Collect and
+#              report with scripts/bpf_coverage.py {run,sweep,report}.
 #
 # Requirements:
 #   ~5 GB free disk space (~35 GB with --llvm-source),
@@ -843,13 +844,12 @@ PATCHES_DIR="${SCRIPT_DIR}/patches"
 PATCH_STACK_DIRS=(
     "${PATCHES_DIR}/uml-veristat"
     "${PATCHES_DIR}/bpf-selftests-uml"
+    "${PATCHES_DIR}/test-coverage"
 )
-# Flavor-only patches: never part of the regular stack. The test-coverage
-# dir carries the gcov instrumentation markers and is applied only when
-# building the coverage flavor (UML_GCOV_BUILD=1).
-if [ "${UML_GCOV_BUILD:-0}" = "1" ]; then
-    PATCH_STACK_DIRS+=( "${PATCHES_DIR}/test-coverage" )
-fi
+# The test-coverage dir carries the coverage campaign's upstream-destined
+# material: coverage-driven selftests, selftests build-dependency fixes, and
+# the gcov instrumentation markers. It is always applied; the gcov markers
+# are inert unless CONFIG_GCOV_KERNEL is enabled (UML_GCOV_BUILD=1 flavor).
 
 collect_patch_files() {
     PATCH_FILES=()
@@ -1261,6 +1261,24 @@ info "UML kernel: ${UML_BINARY} ($(ls -lh "${UML_BINARY}" | awk '{print $5}'))"
 step "7/7  Building bpftool, veristat and BPF selftests"
 
 mkdir -p "${SELFTESTS_OUTPUT}"
+
+# Relocation guard: %.test.d dependency files record absolute paths. If the
+# repo (or the output dir) moves, every recorded target/prerequisite edge
+# silently detaches and make keeps linking stale test objects with no error
+# (three-week ENOKEY debugging epic, 2026-07). Purge any dependency file
+# whose recorded target no longer lives under the current output dir, along
+# with its object, and force a selftests rebuild to regenerate them.
+STALE_TEST_DEPS=0
+while IFS= read -r -d '' dep; do
+    if ! head -n1 "${dep}" | grep -qF "${SELFTESTS_OUTPUT}"; then
+        rm -f "${dep}" "${dep%.d}.o"
+        STALE_TEST_DEPS=$((STALE_TEST_DEPS + 1))
+    fi
+done < <(find "${SELFTESTS_OUTPUT}" -name '*.test.d' -print0 2>/dev/null)
+if [ "${STALE_TEST_DEPS}" -gt 0 ]; then
+    warn "Purged ${STALE_TEST_DEPS} relocated *.test.d/*.test.o pairs; forcing selftests rebuild."
+    REBUILD_SELFTESTS=1
+fi
 
 # Export CLANG, LLC, and LLVM_CONFIG so that all sub-makes (including the
 # feature-detection sub-make invoked by Makefile.feature) inherit them.
