@@ -1,0 +1,43 @@
+From 464a1dc4392b0a9d67a6c7fe47f13484e22f0cd8 Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Sat, 1 Aug 2026 08:26:21 -0700
+Subject: [PATCH 24/24] selftests/bpf: regenerate signed lskels when the
+ signing key changes
+
+The signed light skeleton rule depends only on the BPF object and
+bpftool. The signing key and verification certificate that bpftool
+embeds into the generated header (via LSKEL_SIGN's -k/-i arguments) are
+not prerequisites, so regenerating the key pair leaves previously
+generated signed lskels untouched: they keep a signature made with the
+old key, the kernel is provisioned with the new certificate, and every
+signed-lskel test fails at load time with -ENOKEY. Nothing at build
+time points at the cause.
+
+Add $(PRIVATE_KEY) and $(VERIFICATION_CERT) as real prerequisites of
+the signed lskel rule so a key or certificate change regenerates the
+signed skeletons (and, through the dependency files, rebuilds the test
+objects that embed them).
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ tools/testing/selftests/bpf/Makefile | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/tools/testing/selftests/bpf/Makefile b/tools/testing/selftests/bpf/Makefile
+index e8d17e9ab..8e77699f1 100644
+--- a/tools/testing/selftests/bpf/Makefile
++++ b/tools/testing/selftests/bpf/Makefile
+@@ -666,7 +666,9 @@ $(TRUNNER_BPF_LSKELS): %.lskel.h: %.bpf.o $(BPFTOOL) | $(TRUNNER_OUTPUT)
+ 	}) && \
+ 	rm -f $$(<:.o=.llinked1.o) $$(<:.o=.llinked2.o) $$(<:.o=.llinked3.o)
+ 
+-$(TRUNNER_BPF_LSKELS_SIGNED): %.lskel.h: %.bpf.o $(BPFTOOL) | $(TRUNNER_OUTPUT)
++$(TRUNNER_BPF_LSKELS_SIGNED): %.lskel.h: %.bpf.o $(BPFTOOL)		\
++			      $(PRIVATE_KEY) $(VERIFICATION_CERT)	\
++			      | $(TRUNNER_OUTPUT)
+ 	$(Q)$(if $(PERMISSIVE),if [ ! -f $$< ]; then			\
+ 		$$(RM) $$@;						\
+ 		printf '  %-12s %s\n' 'SKIP-SKEL' '$$(notdir $$@)' 1>&2; \
+-- 
+2.43.0
+

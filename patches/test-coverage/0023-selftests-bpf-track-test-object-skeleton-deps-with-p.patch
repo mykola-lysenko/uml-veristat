@@ -1,0 +1,69 @@
+From 161d8634a46be04592abe6499010d8723e7fcad9 Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Sat, 1 Aug 2026 08:26:21 -0700
+Subject: [PATCH 23/24] selftests/bpf: track test object skeleton deps with
+ per-flavor paths
+
+Test objects are compiled from inside TRUNNER_OUTPUT with -I. and -MMD,
+so the compiler records generated skeleton headers in the %.test.d files
+as bare basenames (e.g. fentry_test.lskel.h). make resolves those bare
+names through the global vpath directives, and since every flavor
+appends its own TRUNNER_OUTPUT to the same vpath patterns, the first
+match always wins: the parent flavor's output directory. Every flavored
+test object (test_progs-no_alu32, test_progs-cpuv4) therefore tracks the
+parent flavor's copy of each skeleton instead of the one it actually
+included. When only the flavored skeleton is regenerated, the flavored
+test object is not rebuilt and silently keeps the stale embedded
+skeleton; light skeletons embed the program and its signature, so the
+mismatch surfaces at runtime (e.g. -ENOKEY on signed lskel loads) with
+no build-time diagnostic.
+
+Compile with -I$(abspath $(TRUNNER_OUTPUT)) instead of -I., so each
+flavor's %.test.d records the skeleton headers it truly included with
+their full per-flavor paths. The vpath directives stay so that %.test.d
+files generated before this change still resolve.
+
+Also pass -MP, which emits a phony target for every recorded header:
+when a generated header is removed or renamed, the test object is
+rebuilt (regenerating its dependency file) instead of make failing with
+'No rule to make target' against a dependency list that no longer
+matches the tree.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ tools/testing/selftests/bpf/Makefile | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/tools/testing/selftests/bpf/Makefile b/tools/testing/selftests/bpf/Makefile
+index bb89854bf..e8d17e9ab 100644
+--- a/tools/testing/selftests/bpf/Makefile
++++ b/tools/testing/selftests/bpf/Makefile
+@@ -708,10 +708,12 @@ $(TRUNNER_BPF_SKELS_LINKED): $(TRUNNER_OUTPUT)/%: $$$$(%-deps) $(BPFTOOL) | $(TR
+ 	}) &&									\
+ 	rm -f $$(@:.skel.h=.linked1.o) $$(@:.skel.h=.linked2.o) $$(@:.skel.h=.linked3.o)
+ 
+-# When the compiler generates a %.d file, only skel basenames (not
+-# full paths) are specified as prerequisites for corresponding %.o
+-# file. vpath directives below instruct make to search for skel files
+-# in TRUNNER_OUTPUT, if they are not present in the working directory.
++# Skeleton headers are recorded in the compiler-generated %.d files with
++# the full per-flavor TRUNNER_OUTPUT path. The vpath directives below
++# remain for %.d files generated before that was the case, where only
++# skel basenames were recorded: they instruct make to search for skel
++# files in TRUNNER_OUTPUT if they are not present in the working
++# directory.
+ vpath %.skel.h $(TRUNNER_OUTPUT)
+ vpath %.lskel.h $(TRUNNER_OUTPUT)
+ vpath %.subskel.h $(TRUNNER_OUTPUT)
+@@ -738,7 +740,7 @@ $(TRUNNER_TEST_OBJS): $(TRUNNER_OUTPUT)/%.test.o:			\
+ 		      $(TRUNNER_TESTS_DIR)/%.c				\
+ 		      | $(TRUNNER_OUTPUT)/%.test.d
+ 	$$(call msg,TEST-OBJ,$(TRUNNER_BINARY),$$@)
+-	$(Q)(cd $$(@D) && $$(CC) -I. $$(CFLAGS) -MMD -MT $$@ -c $(CURDIR)/$$< $$(LDLIBS) -o $$(@F)) $(if $(filter test_progs%,$1),$(if $(PERMISSIVE),|| \
++	$(Q)(cd $$(@D) && $$(CC) -I$(abspath $(TRUNNER_OUTPUT)) $$(CFLAGS) -MMD -MP -MT $$@ -c $(CURDIR)/$$< $$(LDLIBS) -o $$(@F)) $(if $(filter test_progs%,$1),$(if $(PERMISSIVE),|| \
+ 		($(RM) $$@; printf '  %-12s %s\n' 'SKIP-TEST' '$$(notdir $$@)' 1>&2)))
+ 	$$(if $$(TEST_NEEDS_BTFIDS),						\
+ 		$(Q)if [ -f $$@ ]; then						\
+-- 
+2.43.0
+
