@@ -1,0 +1,73 @@
+From 6be14e59b66aa0525d66c8d74b7ffc6ae939a984 Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <mykolal@meta.com>
+Date: Sat, 1 Aug 2026 20:31:55 -0700
+Subject: [PATCH] selftests/bpf: skip cpumask subtests that need two CPUs on UP
+ systems
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The test_and_or_xor and test_intersects_subset cpumask subtests set
+CPU 1 in a mask and then assert on outcomes that depend on it being
+set. On a single-CPU system (nr_cpu_ids == 1) bpf_cpumask_set_cpu(1,
+...) is a no-op — the cpu is out of range — so the OR result never
+contains CPU 1 and the subset relation the test expects does not hold:
+both subtests fail their post-wait error check (err 9) even though the
+cpumask kfuncs behave correctly.
+
+The other subtests that touch CPU 1 only rely on properties that stay
+true when the set is a no-op (emptiness, non-intersection), so they
+keep running everywhere.
+
+Skip the two CPU-1-dependent subtests when libbpf_num_possible_cpus()
+reports fewer than two CPUs, as on UML guests and single-vcpu VMs.
+
+Signed-off-by: Mykola Lysenko <mykolal@meta.com>
+---
+ .../selftests/bpf/prog_tests/cpumask.c        | 23 +++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/tools/testing/selftests/bpf/prog_tests/cpumask.c b/tools/testing/selftests/bpf/prog_tests/cpumask.c
+index 6c45330a5..9cb540aae 100644
+--- a/tools/testing/selftests/bpf/prog_tests/cpumask.c
++++ b/tools/testing/selftests/bpf/prog_tests/cpumask.c
+@@ -5,6 +5,23 @@
+ #include "cpumask_failure.skel.h"
+ #include "cpumask_success.skel.h"
+ 
++/* Subtests that assert on the state of CPU 1 and need at least two CPUs. */
++static const char * const cpumask_two_cpu_testcases[] = {
++	"test_and_or_xor",
++	"test_intersects_subset",
++};
++
++static bool needs_two_cpus(const char *name)
++{
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(cpumask_two_cpu_testcases); i++) {
++		if (!strcmp(name, cpumask_two_cpu_testcases[i]))
++			return true;
++	}
++	return false;
++}
++
+ static const char * const cpumask_success_testcases[] = {
+ 	"test_alloc_free_cpumask",
+ 	"test_set_clear_cpu",
+@@ -79,6 +96,12 @@ void test_cpumask(void)
+ 		if (!test__start_subtest(cpumask_success_testcases[i]))
+ 			continue;
+ 
++		if (needs_two_cpus(cpumask_success_testcases[i]) &&
++		    libbpf_num_possible_cpus() < 2) {
++			test__skip();
++			continue;
++		}
++
+ 		verify_success(cpumask_success_testcases[i]);
+ 	}
+ 
+-- 
+2.43.0
+
