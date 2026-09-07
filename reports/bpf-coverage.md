@@ -1,5 +1,9 @@
 # BPF subsystem coverage under the UML selftests
 
+Historical measurement: this report predates the new program-iterator test.
+Refresh coverage before using these gaps to prioritize work; see
+[project status](../docs/project-status.md).
+
 Read the gaps with three filters in mind before calling something an upstream test gap:
 
 1. **Harness scope** — this sweep runs `test_progs` only; suites living in standalone binaries (`test_maps`, `test_verifier`) do not contribute, so e.g. classic map-op paths may be covered upstream but not here.
