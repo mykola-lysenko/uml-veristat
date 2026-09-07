@@ -252,6 +252,8 @@ build_distro: ${PRETTY_NAME:-${OS_ID:-unknown}}
 bpf-next: ${KERNEL_COMMIT} (${KERNEL_VERSION})
 LLVM: ${LLVM_COMMIT}
 pahole: ${PAHOLE_TAG}
+pahole_source: ${PAHOLE_SOURCE_COMMIT}
+pahole_build_id: ${PAHOLE_BUILD_ID}
 bpf_test_modules: ${testmod_status}
 EOF
 }
@@ -726,28 +728,10 @@ fi
 # Build pahole from source
 # ------------------------------------------------------------------------------
 step "3/7  Building pahole ${PAHOLE_TAG}"
-if [ ! -d "${PAHOLE_SRC}/.git" ]; then
-    git clone --depth=1 --branch "${PAHOLE_TAG}" "${PAHOLE_REPO}" "${PAHOLE_SRC}"
-fi
-if [ "${REBUILD_PAHOLE}" = "1" ]; then
-    rm -rf "${PAHOLE_BUILD}" "${PAHOLE_INSTALL}"
-fi
-if [ ! -f "${PAHOLE_BIN}" ]; then
-    mkdir -p "${PAHOLE_BUILD}"
-    cmake -S "${PAHOLE_SRC}" -B "${PAHOLE_BUILD}" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="${PAHOLE_INSTALL}" \
-        -DCMAKE_INSTALL_RPATH="${PAHOLE_INSTALL}/lib" \
-        -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-        -DLIB_INSTALL_DIR=lib \
-        -DLIBBPF_EMBEDDED=ON \
-        2>&1 | tail -5
-    make -C "${PAHOLE_BUILD}" -j"$(nproc)"
-    make -C "${PAHOLE_BUILD}" install
-    info "pahole: $(${PAHOLE_BIN} --version)"
-else
-    info "pahole already built — skipping."
-fi
+PAHOLE_REPO="${PAHOLE_REPO}" PAHOLE_TAG="${PAHOLE_TAG}" REBUILD_PAHOLE="${REBUILD_PAHOLE}" \
+    bash "${SCRIPT_DIR}/scripts/build_pahole.sh" "${PAHOLE_SRC}" "${PAHOLE_BUILD}" "${PAHOLE_INSTALL}"
+PAHOLE_SOURCE_COMMIT=$(git -C "${PAHOLE_SRC}" rev-parse HEAD)
+PAHOLE_BUILD_ID=$(cat "${PAHOLE_INSTALL}/.uml-build-id")
 
 # Verify pahole works before proceeding — a broken pahole causes silent
 # kernel build failures (BTF disabled, PAHOLE_VERSION=0 warnings).
@@ -1217,6 +1201,18 @@ fi
 # ------------------------------------------------------------------------------
 step "6/7  Building UML kernel"
 
+# Kbuild does not depend on the contents of the pahole executable. Relink
+# vmlinux and the test modules when its source/patch identity changes. Keep
+# this stamp pending until modules are built too, so interrupted runs retry.
+KERNEL_PAHOLE_STAMP="${WORKDIR}/kernel-pahole-build-id"
+if [ "${REBUILD_PAHOLE}" = "1" ] || [ ! -f "${KERNEL_PAHOLE_STAMP}" ] || \
+   [ "$(cat "${KERNEL_PAHOLE_STAMP}")" != "${PAHOLE_BUILD_ID}" ]; then
+    info "pahole identity changed — regenerating kernel and test-module BTF."
+    rm -f "${LINUX_DIR}/vmlinux.unstripped"
+    REBUILD_KERNEL=1
+    REBUILD_TESTMOD=1
+fi
+
 # Check if UML binary already exists, unless rebuilding or updating
 UML_BINARY=""
 for candidate in linux vmlinux; do
@@ -1331,6 +1327,9 @@ fi
 [ -x "${BPFTOOL_BIN}" ] || { echo "bpftool build failed"; exit 1; }
 info "bpftool: ${BPFTOOL_BIN}"
 
+# The selftests host helper rules use LLD for clang -fuse-ld independently
+# of LD. Pass the validated linker to both so the fallback also covers them.
+
 # --- 7b: build everything in the selftests directory ---
 # Running plain 'make' (no explicit target) builds all test binaries,
 # all BPF programs under progs/ (.bpf.o files), and all skeletons.
@@ -1364,6 +1363,7 @@ if [ ! -x "${VERISTAT_BIN}" ] || [ ! -x "${TEST_PROGS_BIN}" ] || \
         CLANG="${CLANG}" \
         LLC="${LLC}" \
         LD="${BUILD_LD}" \
+        LLD="${BUILD_LD}" \
         BPFTOOL="${BPFTOOL_BIN}" \
         VMLINUX_BTF="${UML_BINARY}" \
         ARCH=x86_64 \
@@ -1478,6 +1478,10 @@ if [ "${TESTMOD_BUILD_FAILED}" = "1" ] && [ "${APPLY_PATCHES}" = "1" ] && [ "${K
     exit 1
 fi
 
+if [ "${TESTMOD_BUILD_FAILED}" = "0" ]; then
+    printf '%s\n' "${PAHOLE_BUILD_ID}" > "${KERNEL_PAHOLE_STAMP}"
+fi
+
 echo ""
 info "Build complete!"
 info ""
@@ -1575,6 +1579,8 @@ bpf-next:     ${KERNEL_COMMIT_FULL}
 bpf-next tag: ${KERNEL_VERSION}
 LLVM:         ${LLVM_COMMIT_FULL}
 pahole:       ${PAHOLE_TAG}
+pahole source: ${PAHOLE_SOURCE_COMMIT}
+pahole build id: ${PAHOLE_BUILD_ID}
 bpf_test_modules: $(if [ "${#TESTMOD_PACKAGE_SRCS[@]}" -gt 0 ]; then autoload_test_kmod_files; else echo unavailable; fi)
 VEOF
 

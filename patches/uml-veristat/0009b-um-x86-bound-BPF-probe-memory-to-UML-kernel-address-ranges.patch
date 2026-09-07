@@ -1,4 +1,4 @@
-From 23107889ed3a1b4adc26865af54053778d714c67 Mon Sep 17 00:00:00 2001
+From 479c7972cdd14d31d8d4cd3e443ebd08cec5ec74 Mon Sep 17 00:00:00 2001
 From: Mykola Lysenko <mykolal@meta.com>
 Date: Sat, 11 Jul 2026 10:30:04 -0700
 Subject: [PATCH] um/x86: bound BPF probe memory to UML kernel address ranges
@@ -31,10 +31,10 @@ Signed-off-by: Mykola Lysenko <mykolal@meta.com>
  1 file changed, 27 insertions(+), 6 deletions(-)
 
 diff --git a/arch/x86/net/bpf_jit_comp.c b/arch/x86/net/bpf_jit_comp.c
-index d59b3001f..9450b8f00 100644
+index f7845d7db..d8b415038 100644
 --- a/arch/x86/net/bpf_jit_comp.c
 +++ b/arch/x86/net/bpf_jit_comp.c
-@@ -23,6 +23,9 @@
+@@ -24,6 +24,9 @@
  #include <asm/unwind.h>
  #include <asm/vsyscall.h>
  #include <asm/cfi.h>
@@ -42,9 +42,9 @@ index d59b3001f..9450b8f00 100644
 +#include <as-layout.h>
 +#endif
  
- #ifdef CONFIG_UML
- static const unsigned char x86_nop1[] = { BYTES_NOP1 };
-@@ -2507,14 +2510,32 @@ st:			insn_off = insn->off;
+ #if IS_ENABLED(CONFIG_BPF_JIT_KASAN)
+ void __asan_load1(void *p);
+@@ -2729,14 +2732,32 @@ static int do_jit(struct bpf_verifier_env *env, struct bpf_prog *bpf_prog, int *
  				 *   src_reg + insn->off > TASK_SIZE_MAX + PAGE_SIZE
  				 *   and
  				 *   src_reg + insn->off < VSYSCALL_ADDR
@@ -81,7 +81,7 @@ index d59b3001f..9450b8f00 100644
  
  				/* mov src_reg, r11 */
  				EMIT_mov(AUX_REG, src_reg);
-@@ -2537,8 +2558,8 @@ st:			insn_off = insn->off;
+@@ -2759,8 +2780,8 @@ static int do_jit(struct bpf_verifier_env *env, struct bpf_prog *bpf_prog, int *
  				maybe_emit_mod(&prog, AUX_REG, BPF_REG_AX, true);
  				EMIT2(0x39, add_2reg(0xC0, AUX_REG, BPF_REG_AX));
  

@@ -1,0 +1,61 @@
+--- a/dwarf_loader.c
++++ b/dwarf_loader.c
+@@ -2914,7 +2914,7 @@
+ 	return 0;
+ }
+ 
+-static bool param__is_struct(struct cu *cu, struct tag *tag)
++static bool param__may_use_multiple_regs(struct cu *cu, struct tag *tag)
+ {
+ 	struct tag *type = cu__type(cu, tag->type);
+ 
+@@ -2924,10 +2924,12 @@
+ 	switch (type->tag) {
+ 	case DW_TAG_structure_type:
+ 		return true;
++	case DW_TAG_base_type:
++		return tag__size(type, cu) > cu->addr_size;
+ 	case DW_TAG_const_type:
+ 	case DW_TAG_typedef:
+-		/* handle "typedef struct", const parameter */
+-		return param__is_struct(cu, type);
++		/* Follow typedefs and const-qualified parameters. */
++		return param__may_use_multiple_regs(cu, type);
+ 	default:
+ 		return false;
+ 	}
+@@ -2942,7 +2944,7 @@
+ 		struct tag *tag = pt->entries[i];
+ 		struct parameter *pos;
+ 		struct function *fn = tag__function(tag);
+-		bool has_unexpected_reg = false, has_struct_param = false;
++		bool has_unexpected_reg = false, has_multi_reg_param = false;
+ 
+ 		/* mark function as optimized if parameter is, or
+ 		 * if parameter does not have a location; at this
+@@ -2953,8 +2955,8 @@
+ 		 *
+ 		 * Also mark functions which, due to optimization,
+ 		 * use an unexpected register for a parameter.
+-		 * Exception is functions which have a struct
+-		 * as a parameter, as multiple registers may
++		 * Exception is functions which have a struct or
++		 * wide scalar parameter, as multiple registers may
+ 		 * be used to represent it, throwing off register
+ 		 * to parameter mapping.
+ 		 */
+@@ -2967,11 +2969,11 @@
+ 		}
+ 		if (has_unexpected_reg) {
+ 			ftype__for_each_parameter(&fn->proto, pos) {
+-				has_struct_param = param__is_struct(cu, &pos->tag);
+-				if (has_struct_param)
++				has_multi_reg_param = param__may_use_multiple_regs(cu, &pos->tag);
++				if (has_multi_reg_param)
+ 					break;
+ 			}
+-			if (!has_struct_param)
++			if (!has_multi_reg_param)
+ 				fn->proto.unexpected_reg = 1;
+ 		}
+ 
