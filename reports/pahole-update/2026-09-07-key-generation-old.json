@@ -1,0 +1,50 @@
+[
+  {
+    "attempt": 0,
+    "rc": 0,
+    "generations": 2,
+    "embedded_certificate_matches_signing_key": true
+  },
+  {
+    "attempt": 1,
+    "rc": 0,
+    "generations": 2,
+    "embedded_certificate_matches_signing_key": true
+  },
+  {
+    "attempt": 2,
+    "rc": 0,
+    "generations": 2,
+    "embedded_certificate_matches_signing_key": false
+  },
+  {
+    "attempt": 3,
+    "rc": 0,
+    "generations": 2,
+    "embedded_certificate_matches_signing_key": false
+  },
+  {
+    "attempt": 4,
+    "rc": 0,
+    "generations": 2,
+    "embedded_certificate_matches_signing_key": true
+  },
+  {
+    "attempt": 5,
+    "rc": 0,
+    "generations": 2,
+    "embedded_certificate_matches_signing_key": true
+  },
+  {
+    "attempt": 6,
+    "rc": 0,
+    "generations": 2,
+    "embedded_certificate_matches_signing_key": false
+  },
+  {
+    "attempt": 7,
+    "rc": 0,
+    "generations": 2,
+    "embedded_certificate_matches_signing_key": true
+  }
+]

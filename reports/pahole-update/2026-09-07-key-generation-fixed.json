@@ -1,0 +1,50 @@
+[
+  {
+    "attempt": 0,
+    "generations": 1,
+    "embedded_certificate_matches_signing_key": true,
+    "missing_certificate_recreated_without_key_rotation": true
+  },
+  {
+    "attempt": 1,
+    "generations": 1,
+    "embedded_certificate_matches_signing_key": true,
+    "missing_certificate_recreated_without_key_rotation": true
+  },
+  {
+    "attempt": 2,
+    "generations": 1,
+    "embedded_certificate_matches_signing_key": true,
+    "missing_certificate_recreated_without_key_rotation": true
+  },
+  {
+    "attempt": 3,
+    "generations": 1,
+    "embedded_certificate_matches_signing_key": true,
+    "missing_certificate_recreated_without_key_rotation": true
+  },
+  {
+    "attempt": 4,
+    "generations": 1,
+    "embedded_certificate_matches_signing_key": true,
+    "missing_certificate_recreated_without_key_rotation": true
+  },
+  {
+    "attempt": 5,
+    "generations": 1,
+    "embedded_certificate_matches_signing_key": true,
+    "missing_certificate_recreated_without_key_rotation": true
+  },
+  {
+    "attempt": 6,
+    "generations": 1,
+    "embedded_certificate_matches_signing_key": true,
+    "missing_certificate_recreated_without_key_rotation": true
+  },
+  {
+    "attempt": 7,
+    "generations": 1,
+    "embedded_certificate_matches_signing_key": true,
+    "missing_certificate_recreated_without_key_rotation": true
+  }
+]

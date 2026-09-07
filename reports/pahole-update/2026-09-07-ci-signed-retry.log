@@ -1,0 +1,44 @@
+test_atomics:PASS:atomics skeleton open 0 nsec
+test_atomics:FAIL:atomics skeleton load unexpected error: -126 (errno 126)
+#15      atomics:FAIL
+test_fentry_fexit:PASS:fentry_skel_load 0 nsec
+test_fentry_fexit:FAIL:fentry_skel_load unexpected error: -126 (errno 126)
+#127     fentry_fexit:FAIL
+fentry_test:PASS:fentry_skel_open 0 nsec
+fentry_test:FAIL:fentry_skel_load unexpected error: -126 (errno 126)
+#128/1   fentry_test/fentry:FAIL
+#128/2   fentry_test/fentry_many_args:OK
+#128     fentry_test:FAIL
+fexit_test:PASS:fexit_skel_open 0 nsec
+fexit_test:FAIL:fexit_skel_load unexpected error: -126 (errno 126)
+#132/1   fexit_test/fexit:FAIL
+#132/2   fexit_test/fexit_many_args:OK
+#132     fexit_test:FAIL
+#2/1     arena_atomics/add:OK
+#2/2     arena_atomics/sub:OK
+#2/3     arena_atomics/and:OK
+#2/4     arena_atomics/or:OK
+#2/5     arena_atomics/xor:OK
+#2/6     arena_atomics/cmpxchg:OK
+#2/7     arena_atomics/xchg:OK
+#2/8     arena_atomics/uaf:OK
+#2/9     arena_atomics/load_acquire:OK
+#2/10    arena_atomics/store_release:OK
+#2       arena_atomics:OK
+
+All error logs:
+test_atomics:PASS:atomics skeleton open 0 nsec
+test_atomics:FAIL:atomics skeleton load unexpected error: -126 (errno 126)
+#15      atomics:FAIL
+test_fentry_fexit:PASS:fentry_skel_load 0 nsec
+test_fentry_fexit:FAIL:fentry_skel_load unexpected error: -126 (errno 126)
+#127     fentry_fexit:FAIL
+fentry_test:PASS:fentry_skel_open 0 nsec
+fentry_test:FAIL:fentry_skel_load unexpected error: -126 (errno 126)
+#128/1   fentry_test/fentry:FAIL
+#128     fentry_test:FAIL
+fexit_test:PASS:fexit_skel_open 0 nsec
+fexit_test:FAIL:fexit_skel_load unexpected error: -126 (errno 126)
+#132/1   fexit_test/fexit:FAIL
+#132     fexit_test:FAIL
+Summary: 1/12 PASSED, 0 SKIPPED, 4/2 FAILED

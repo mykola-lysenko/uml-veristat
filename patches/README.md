@@ -627,7 +627,10 @@ the old key → `-ENOKEY` at load. The new upstream pin already tracks the
 verification certificate.
 
 **Fix:** retain `$(PRIVATE_KEY)` as an additional prerequisite alongside
-the upstream `$(VERIFICATION_CERT)` dependency.
+the upstream `$(VERIFICATION_CERT)` dependency. Generate the key pair once
+through the private-key target and derive the certificate from it; parallel
+independent recipes could otherwise give headers and signatures different
+keys despite a successful build.
 
 ### 0028 — `selftests/bpf: track libarena BPF build dependencies`
 
