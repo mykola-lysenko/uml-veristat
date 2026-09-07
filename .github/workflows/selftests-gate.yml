@@ -9,6 +9,7 @@ on:
       - 'scripts/**'
       - 'corpus_manifest.json'
       - 'bpf-next-commit'
+      - 'pahole-commit'
       - 'reports/selftests-baseline/**'
       - '.github/workflows/selftests-gate.yml'
   push:

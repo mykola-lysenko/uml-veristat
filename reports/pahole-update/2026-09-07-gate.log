@@ -1,0 +1,43 @@
+gate: running full sweep: /usr/bin/python3 /home/prozak/sources/bpf-uml-selftests/scripts/run_test_chunks.py --out-dir .build/test-logs/pahole-416753b4-20260907 --jobs 2
+chunk 000/30: rc=1 26.2s 
+chunk 002/30: rc=1 18.7s 
+chunk 001/30: rc=1 65.6s 
+chunk 003/30: rc=1 40.4s 
+chunk 004/30: rc=1 47.2s 
+chunk 005/30: rc=1 31.5s 
+chunk 007/30: rc=1 26.4s 
+chunk 006/30: rc=1 77.7s 
+chunk 009/30: rc=1 66.9s 
+chunk 010/30: rc=1 44.9s 
+chunk 008/30: rc=1 166.5s 
+chunk 012/30: rc=1 29.8s 
+chunk 011/30: rc=0 47.5s 
+chunk 014/30: rc=0 3.3s 
+chunk 013/30: rc=1 14.6s 
+chunk 015/30: rc=0 15.2s 
+chunk 017/30: rc=1 43.8s 
+chunk 016/30: rc=1 72.3s 
+chunk 019/30: rc=1 29.2s 
+chunk 018/30: rc=1 53.9s 
+chunk 020/30: rc=1 115.2s 
+chunk 021/30: rc=1 235.0s 
+chunk 023/30: rc=0 9.3s 
+chunk 022/30: rc=1 143.9s 
+chunk 024/30: rc=1 20.6s 
+chunk 026/30: rc=1 42.2s 
+chunk 025/30: rc=0 68.1s 
+chunk 028/30: rc=0 33.2s 
+chunk 027/30: rc=1 44.3s 
+chunk 030/30: rc=0 65.5s 
+chunk 029/30: rc=1 100.0s 
+
+wrote .build/test-logs/pahole-416753b4-20260907/summary.json and summary.md
+counts: {"OK": 623, "SKIP": 86, "FAIL": 58}
+# Selftests gate — PASS
+
+- baseline: `2026-09-06-1b7415bf7-gate.json` (OK 623 / FAIL 58 / SKIP 86)
+- run: OK 623 / FAIL 58 / SKIP 86, 31 chunks, 0 timeout(s)
+- pin: `1b7415bf7` matches `bpf-next-commit`
+
+_FLAKY list has 1 entrie(s) — work to burn it down._
+

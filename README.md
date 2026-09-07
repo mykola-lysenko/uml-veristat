@@ -14,10 +14,11 @@ The runtime baseline on Linux 7.3-rc2 is **623 OK / 58 FAIL / 86 SKIP /
 for provenance, the four upstream dummy-test reporting corrections, and
 known coverage gaps. The denylist and `timer_mim` flake policy are unchanged.
 
-The normal build includes a pahole v1.31 fix that preserves BTF for the
-new 128-bit tracing subtest. All four tracing subtests pass; see the
-[integration validation](reports/pin-update/2026-09-06-pahole-integration.md).
-The next dependency updates are upstream pahole, followed by LLVM.
+The normal build uses the upstream revision in [`pahole-commit`](pahole-commit).
+It already fixes the 128-bit tracing case, so the local pahole patch has
+been retired. See the [upstream comparison](reports/pahole-update/2026-09-07.md).
+The full pahole comparison preserves every recorded test status. LLVM is
+the next dependency update.
 
 ## How it works
 
@@ -41,7 +42,7 @@ cd uml-veristat
 ### What `build.sh` does
 1. Installs host build dependencies (`apt`, `dnf`, `zypper`, or `pacman`).
 2. Downloads a pre-built LLVM/Clang release from GitHub (or builds from source with `--llvm-source`).
-3. Builds `pahole` (v1.31) from source.
+3. Builds `pahole` from the upstream revision in `pahole-commit`.
 4. Clones `bpf-next` and checks out the committed kernel pin.
 5. Applies the UML/BPF patch stack (see [`patches/`](patches/)).
 6. Builds the UML kernel (`linux`) with BPF and BTF enabled.
@@ -130,10 +131,10 @@ up, and exposes the BPF selftest modules from the selftests output directory so
 All three folders participate in normal builds. The gcov markers only enable
 instrumentation when `CONFIG_GCOV_KERNEL` is set (`UML_GCOV_BUILD=1`).
 
-The separate [`patches/pahole/`](patches/pahole/) patch fixes BTF generation
-for wide scalar arguments. Normal builds apply it automatically, rebuild
-pahole when its inputs change, and regenerate kernel/module BTF. Package
-and distro CI validate it with the `tracing_struct` runtime test.
+Pahole uses an upstream commit pin and source/recipe identity to rebuild
+when its inputs change, regenerating kernel/module BTF and selftests.
+Package and distro CI check the `tracing_struct` runtime test. The
+[historical pahole correction](patches/pahole/) is no longer applied.
 
 The stack now uses real BPF tracing/LSM and software perf implementations,
 plus dynamic ftrace with direct calls. The former verification stubs and

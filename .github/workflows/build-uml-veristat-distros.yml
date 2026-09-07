@@ -10,6 +10,7 @@ on:
       - 'scripts/**'
       - 'corpus_manifest.json'
       - 'bpf-next-commit'
+      - 'pahole-commit'
       - '.github/workflows/build-uml-veristat-distros.yml'
   push:
     tags:

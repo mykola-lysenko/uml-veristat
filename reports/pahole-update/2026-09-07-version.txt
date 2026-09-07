@@ -1,0 +1,10 @@
+Built: 2026-09-07 16:51 UTC
+mode: patched
+skipped_patches: 
+build_distro: Ubuntu 24.04.4 LTS
+bpf-next: 1b7415bf7 (7.3.0-rc2)
+LLVM: reused-clang version 22.1.8 (https://github.com/llvm/llvm-project ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)
+pahole: 416753b4ba90fe3b72952ace9954edb321657936
+pahole_source: 416753b4ba90fe3b72952ace9954edb321657936
+pahole_build_id: a9b7301d8f58833eba5c167f378f9a1e9596a7ef12f2a5c4f6a3dfb6b22d1150
+bpf_test_modules: available: bpf_testmod.ko bpf_test_modorder_x.ko bpf_test_modorder_y.ko

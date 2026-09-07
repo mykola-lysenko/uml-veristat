@@ -4,26 +4,29 @@ Date: Sat, 1 Aug 2026 08:26:21 -0700
 Subject: [PATCH] selftests/bpf: regenerate signed lskels when the signing key
  changes
 
-The signed light skeleton rule depends on the BPF object, bpftool,
-and verification certificate, but not the private key passed to
-bpftool through LSKEL_SIGN's -k argument. Updating that input without
-changing the certificate leaves the generated signed header stale.
+The signed light skeleton rule does not track the private key passed to
+bpftool through LSKEL_SIGN. Add it alongside the upstream verification
+certificate prerequisite so either signing input regenerates consumers.
 
-Add $(PRIVATE_KEY) as a real prerequisite alongside the existing
-$(VERIFICATION_CERT) dependency so a change to either signing input
-regenerates signed skeletons and rebuilds their consumers through the
-dependency files.
+Also give the key pair a single producer. The independent multi-target
+rule can run genkey twice under parallel make. A certificate header may
+capture the first pair while skeletons are signed with the second,
+causing ENOKEY at runtime even though the build completed successfully.
+
+Generate the private key once and derive the certificate from it. This
+also recreates a missing certificate without rotating the private key,
+and works without grouped-target syntax from newer GNU make versions.
 
 Signed-off-by: Mykola Lysenko <mykolal@meta.com>
 ---
- tools/testing/selftests/bpf/Makefile | 4 +++-
- 1 file changed, 3 insertions(+), 1 deletion(-)
+ tools/testing/selftests/bpf/Makefile | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
 
 diff --git a/tools/testing/selftests/bpf/Makefile b/tools/testing/selftests/bpf/Makefile
-index 30d3b94f8..434316a26 100644
+index 30d3b94f8..5944ea9d9 100644
 --- a/tools/testing/selftests/bpf/Makefile
 +++ b/tools/testing/selftests/bpf/Makefile
-@@ -662,7 +662,9 @@ $(TRUNNER_BPF_LSKELS): %.lskel.h: %.bpf.o $(BPFTOOL) | $(TRUNNER_OUTPUT)
+@@ -662,7 +662,9 @@
  	}) && \
  	rm -f $$(<:.o=.llinked1.o) $$(<:.o=.llinked2.o) $$(<:.o=.llinked3.o)
  
@@ -34,6 +37,19 @@ index 30d3b94f8..434316a26 100644
  	$(Q)$(if $(PERMISSIVE),if [ ! -f $$< ]; then			\
  		$$(RM) $$@;						\
  		printf '  %-12s %s\n' 'SKIP-SKEL' '$$(notdir $$@)' 1>&2; \
+@@ -805,9 +807,12 @@
+ VERIFICATION_CERT   := $(BUILD_DIR)/signing_key.der
+ PRIVATE_KEY := $(BUILD_DIR)/signing_key.pem
+ 
+-$(VERIFICATION_CERT) $(PRIVATE_KEY): $(VERIFY_SIG_SETUP)
++$(PRIVATE_KEY): $(VERIFY_SIG_SETUP)
+ 	$(Q)mkdir -p $(BUILD_DIR)
+ 	$(Q)$(VERIFY_SIG_SETUP) genkey $(BUILD_DIR)
++
++$(VERIFICATION_CERT): $(PRIVATE_KEY)
++	$(Q)openssl x509 -in $< -out $@ -outform der
+ 
+ # Generates a header with C array declaration, containing test_progs_verification_cert bytes
+ $(VERIFY_SIG_HDR): $(VERIFICATION_CERT)
 -- 
 2.43.0
-

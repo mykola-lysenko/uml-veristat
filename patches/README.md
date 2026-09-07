@@ -25,10 +25,9 @@ The stack is split by purpose:
 organizational; the full package and CI path still uses every folder unless
 `--clean` or `--skip-patches` is requested.
 
-[`pahole/`](pahole/) is a separate toolchain patch set, applied when building
-pahole in every mode. It is not included in the kernel stack or kernel
-patch counts. Its wide-scalar fix preserves function BTF for 128-bit tracing
-arguments.
+The [former pahole patch](pahole/) is retired: the upstream revision in
+`pahole-commit` already handles wide scalar argument BTF. Pahole builds
+without local patches; the kernel patch inventory is unchanged.
 
 ## Patches
 
@@ -628,7 +627,10 @@ the old key → `-ENOKEY` at load. The new upstream pin already tracks the
 verification certificate.
 
 **Fix:** retain `$(PRIVATE_KEY)` as an additional prerequisite alongside
-the upstream `$(VERIFICATION_CERT)` dependency.
+the upstream `$(VERIFICATION_CERT)` dependency. Generate the key pair once
+through the private-key target and derive the certificate from it; parallel
+independent recipes could otherwise give headers and signatures different
+keys despite a successful build.
 
 ### 0028 — `selftests/bpf: track libarena BPF build dependencies`
 

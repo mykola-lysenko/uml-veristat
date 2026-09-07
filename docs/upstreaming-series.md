@@ -17,11 +17,11 @@ posting; the local patch inventory alone does not establish either.
 | `uml-veristat/0027` | UML static CPU feature macro calls itself instead of the inline helper | Check current upstream applicability and UML build coverage |
 | `test-coverage/0028` | Libarena BPF objects remain stale after header changes | Validate regular and ASAN dependency rebuilds on native builds |
 
-The separate `pahole/0001` fixes wide-scalar argument BTF and is integrated
-locally. Check a newer upstream pahole before deciding whether to submit it;
-submission remains pending the user's decision. Patch `0024` now retains
-only the private-key prerequisite because the advanced kernel pin already
-tracks the verification certificate.
+The separate `pahole/0001` workaround is retired: unpatched upstream
+master fixes the wide-scalar tracing case, so it does not need submission.
+See the [comparison](../reports/pahole-update/2026-09-07.md). Patch `0024`
+retains only the private-key prerequisite because the advanced kernel pin
+already tracks the verification certificate.
 
 Start with `0023/0024` as a related selftests build-fix series. Prepare `0026`
 as a separate selftest fix and `0025` for UML review. For each, check a fresh

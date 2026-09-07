@@ -1,0 +1,6 @@
+Expectation check passed for corpus `top-level`.
+- Standalone input files: 991
+- Failed-to-process files: 5
+- Failed-to-open files: 3
+- Success rows: 3071
+- Failure rows: 1940
