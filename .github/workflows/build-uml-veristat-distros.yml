@@ -103,6 +103,7 @@ jobs:
           fi
 
           python3 scripts/check_expectations.py
+          ./uml-test-progs -j1 --watchdog-timeout=120 -t tracing_struct
 
           echo "linux dependencies:"
           ldd "$HOME/.local/share/uml-veristat/linux" || true

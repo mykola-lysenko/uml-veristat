@@ -1,0 +1,35 @@
+From 85883aae07849d422cd81fbf9541880f01f5157a Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <nickolay.lysenko@gmail.com>
+Date: Sun, 6 Sep 2026 21:09:43 -0700
+Subject: [PATCH] um: fix recursive static CPU feature test
+
+The _static_cpu_has() macro refers to itself in its nonconstant arm
+instead of calling the __static_cpu_has() inline helper. A macro is
+not expanded recursively, so users of cpu_feature_enabled() reach an
+undeclared function and fail to compile with
+-Werror=implicit-function-declaration.
+
+Call __static_cpu_has(), matching the native x86 implementation. This
+restores compilation of the x86 BPF JIT backend under UML.
+
+Signed-off-by: Mykola Lysenko <nickolay.lysenko@gmail.com>
+---
+ arch/um/include/asm/cpufeature.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/um/include/asm/cpufeature.h b/arch/um/include/asm/cpufeature.h
+index 69db6b5cf..b41d906dd 100644
+--- a/arch/um/include/asm/cpufeature.h
++++ b/arch/um/include/asm/cpufeature.h
+@@ -120,7 +120,7 @@ static __always_inline bool __static_cpu_has(u16 bit)
+ (								\
+ 	__builtin_constant_p(boot_cpu_has(bit)) ?		\
+ 		boot_cpu_has(bit) :				\
+-		_static_cpu_has(bit)				\
++		__static_cpu_has(bit)				\
+ )
+ 
+ #define cpu_has_bug(c, bit)		cpu_has(c, (bit))
+-- 
+2.43.0
+

@@ -12,6 +12,8 @@ The active project lives at the repository root. See
 | `patches/uml-veristat/` | Base UML/BPF support |
 | `patches/bpf-selftests-uml/` | Runtime, libbpf, and selftest compatibility fixes |
 | `patches/test-coverage/` | New tests, build-dependency fixes, and gcov markers |
+| `patches/pahole/` | Local pahole fixes, separate from the kernel stack |
+| `scripts/build_pahole.sh` | Apply pahole patches and track installation identity |
 | `scripts/` | Runtime gate, corpus checks, coverage, and patch validation |
 | `reports/selftests-baseline/CURRENT` | Pointer to the adopted runtime baseline |
 | `corpus_manifest.json` | Standalone verifier corpus policy and expectations |

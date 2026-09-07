@@ -141,11 +141,11 @@
     "expected_metrics": {
       "input_files": 11,
       "processed_files": 11,
-      "processed_programs": 60,
+      "processed_programs": 66,
       "skipped_files": 0,
       "skipped_programs": 0,
-      "success_rows": 58,
-      "failure_rows": 2
+      "success_rows": 63,
+      "failure_rows": 3
     },
     "expected_failed_process": {},
     "expected_failed_open": {},
@@ -156,6 +156,9 @@
         },
         "iter_maps3": {
           "reason": "expected-negative verifier case: bpf_arena_alloc_pages() receives untrusted inner_map_meta pointer"
+        },
+        "mixed_arena_stack_atomic": {
+          "reason": "expected-negative verifier case: the same atomic instruction is used with arena and stack pointers"
         }
       }
     }

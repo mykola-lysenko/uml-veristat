@@ -1,22 +1,18 @@
-From 464a1dc4392b0a9d67a6c7fe47f13484e22f0cd8 Mon Sep 17 00:00:00 2001
+From 700be7df78e009642af92b56e38eaa8d7ba14db7 Mon Sep 17 00:00:00 2001
 From: Mykola Lysenko <mykolal@meta.com>
 Date: Sat, 1 Aug 2026 08:26:21 -0700
-Subject: [PATCH 24/24] selftests/bpf: regenerate signed lskels when the
- signing key changes
+Subject: [PATCH] selftests/bpf: regenerate signed lskels when the signing key
+ changes
 
-The signed light skeleton rule depends only on the BPF object and
-bpftool. The signing key and verification certificate that bpftool
-embeds into the generated header (via LSKEL_SIGN's -k/-i arguments) are
-not prerequisites, so regenerating the key pair leaves previously
-generated signed lskels untouched: they keep a signature made with the
-old key, the kernel is provisioned with the new certificate, and every
-signed-lskel test fails at load time with -ENOKEY. Nothing at build
-time points at the cause.
+The signed light skeleton rule depends on the BPF object, bpftool,
+and verification certificate, but not the private key passed to
+bpftool through LSKEL_SIGN's -k argument. Updating that input without
+changing the certificate leaves the generated signed header stale.
 
-Add $(PRIVATE_KEY) and $(VERIFICATION_CERT) as real prerequisites of
-the signed lskel rule so a key or certificate change regenerates the
-signed skeletons (and, through the dependency files, rebuilds the test
-objects that embed them).
+Add $(PRIVATE_KEY) as a real prerequisite alongside the existing
+$(VERIFICATION_CERT) dependency so a change to either signing input
+regenerates signed skeletons and rebuilds their consumers through the
+dependency files.
 
 Signed-off-by: Mykola Lysenko <mykolal@meta.com>
 ---
@@ -24,14 +20,14 @@ Signed-off-by: Mykola Lysenko <mykolal@meta.com>
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/tools/testing/selftests/bpf/Makefile b/tools/testing/selftests/bpf/Makefile
-index e8d17e9ab..8e77699f1 100644
+index 30d3b94f8..434316a26 100644
 --- a/tools/testing/selftests/bpf/Makefile
 +++ b/tools/testing/selftests/bpf/Makefile
-@@ -666,7 +666,9 @@ $(TRUNNER_BPF_LSKELS): %.lskel.h: %.bpf.o $(BPFTOOL) | $(TRUNNER_OUTPUT)
+@@ -662,7 +662,9 @@ $(TRUNNER_BPF_LSKELS): %.lskel.h: %.bpf.o $(BPFTOOL) | $(TRUNNER_OUTPUT)
  	}) && \
  	rm -f $$(<:.o=.llinked1.o) $$(<:.o=.llinked2.o) $$(<:.o=.llinked3.o)
  
--$(TRUNNER_BPF_LSKELS_SIGNED): %.lskel.h: %.bpf.o $(BPFTOOL) | $(TRUNNER_OUTPUT)
+-$(TRUNNER_BPF_LSKELS_SIGNED): %.lskel.h: %.bpf.o $(BPFTOOL) $(VERIFICATION_CERT) | $(TRUNNER_OUTPUT)
 +$(TRUNNER_BPF_LSKELS_SIGNED): %.lskel.h: %.bpf.o $(BPFTOOL)		\
 +			      $(PRIVATE_KEY) $(VERIFICATION_CERT)	\
 +			      | $(TRUNNER_OUTPUT)

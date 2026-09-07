@@ -1,4 +1,4 @@
-From 54052aae8adb8b80d3ea269c78d853d46bdb3abc Mon Sep 17 00:00:00 2001
+From 95022dd0b7a242b41d2dd96f88821f9535475c58 Mon Sep 17 00:00:00 2001
 From: Mykola Lysenko <mykolal@meta.com>
 Date: Fri, 19 Jun 2026 13:56:53 -0700
 Subject: [PATCH] um/x86: make BPF text pokes writable under UML
@@ -14,15 +14,14 @@ entry slot.
 
 Signed-off-by: Mykola Lysenko <mykolal@meta.com>
 ---
- arch/x86/net/bpf_jit_comp.c | 31 ++++++++++++++++++++++++++---
+ arch/x86/net/bpf_jit_comp.c | 31 ++++++++++++++++++++++++++++---
  1 file changed, 28 insertions(+), 3 deletions(-)
 
 diff --git a/arch/x86/net/bpf_jit_comp.c b/arch/x86/net/bpf_jit_comp.c
-index 5ad6dbc01d5d..2ec24d084204 100644
+index d8b415038..f6dbfa19e 100644
 --- a/arch/x86/net/bpf_jit_comp.c
 +++ b/arch/x86/net/bpf_jit_comp.c
-@@ -23,16 +23,18 @@
- #include <asm/unwind.h>
+@@ -25,6 +25,7 @@
  #include <asm/vsyscall.h>
  #include <asm/cfi.h>
  #ifdef CONFIG_UML
@@ -30,8 +29,7 @@ index 5ad6dbc01d5d..2ec24d084204 100644
  #include <as-layout.h>
  #endif
  
- #ifdef CONFIG_UML
- static const unsigned char x86_nop1[] = { BYTES_NOP1 };
+@@ -44,7 +45,8 @@ static const unsigned char x86_nop1[] = { BYTES_NOP1 };
  static const unsigned char x86_nop2[] = { BYTES_NOP2 };
  static const unsigned char x86_nop3[] = { BYTES_NOP3 };
  static const unsigned char x86_nop4[] = { BYTES_NOP4 };
@@ -41,7 +39,7 @@ index 5ad6dbc01d5d..2ec24d084204 100644
  static const unsigned char x86_nop6[] = { BYTES_NOP6 };
  static const unsigned char x86_nop7[] = { BYTES_NOP7 };
  static const unsigned char x86_nop8[] = { BYTES_NOP8 };
-@@ -59,18 +63,41 @@ const unsigned char * const x86_nops[ASM_NOP_MAX + 1] = {
+@@ -74,18 +76,41 @@ const unsigned char * const x86_nops[ASM_NOP_MAX + 1] = {
  enum cfi_mode cfi_mode = CFI_OFF;
  unsigned long this_cpu_off;
  
@@ -86,4 +84,5 @@ index 5ad6dbc01d5d..2ec24d084204 100644
  #endif
  
 -- 
-2.53.0-Meta
+2.43.0
+

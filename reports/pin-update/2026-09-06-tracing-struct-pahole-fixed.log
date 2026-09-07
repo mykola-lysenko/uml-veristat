@@ -1,0 +1,6 @@
+#567/1   tracing_struct/struct_args:OK
+#567/2   tracing_struct/struct_many_args:OK
+#567/3   tracing_struct/int128_args:OK
+#567/4   tracing_struct/union_args:OK
+#567     tracing_struct:OK
+Summary: 1/4 PASSED, 0 SKIPPED, 0/0 FAILED

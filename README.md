@@ -8,11 +8,16 @@ It allows you to test BPF programs against that upstream verifier without needin
 
 The [project status and roadmap](docs/project-status.md) records the kernel
 pin, validation evidence, supported capabilities, and next work.
-The current runtime baseline is **604 OK / 56 FAIL / 76 SKIP / 0 NORESULT**.
-It adopts the August 1 cpumask sweep: cpumask now passes with two intended
-single-CPU skips, while the existing `timer_mim` flake offsets the aggregate
-pass gain. See the [baseline report](reports/selftests-baseline/2026-09-06-520d7d794-gate.md)
-for provenance and the measured results.
+The runtime baseline on Linux 7.3-rc2 is **623 OK / 58 FAIL / 86 SKIP /
+0 NORESULT**, measured in a fresh full sweep with LLVM 22.1.8. See the
+[baseline report](reports/selftests-baseline/2026-09-06-1b7415bf7-gate.md)
+for provenance, the four upstream dummy-test reporting corrections, and
+known coverage gaps. The denylist and `timer_mim` flake policy are unchanged.
+
+The normal build includes a pahole v1.31 fix that preserves BTF for the
+new 128-bit tracing subtest. All four tracing subtests pass; see the
+[integration validation](reports/pin-update/2026-09-06-pahole-integration.md).
+The next dependency updates are upstream pahole, followed by LLVM.
 
 ## How it works
 
@@ -114,16 +119,21 @@ up, and exposes the BPF selftest modules from the selftests output directory so
 
 ## Kernel Patches
 
-`build.sh` applies 27 patches from three folders, in order:
+`build.sh` applies 29 patches from three folders, in order:
 
 | Folder | Patches | Purpose |
 |--------|---------|---------|
-| [`patches/uml-veristat/`](patches/uml-veristat/) | 10 | UML kernel, JIT, perf, tracing, irq_work, and nofault support |
+| [`patches/uml-veristat/`](patches/uml-veristat/) | 11 | UML kernel, JIT, perf, tracing, irq_work, and nofault support |
 | [`patches/bpf-selftests-uml/`](patches/bpf-selftests-uml/) | 13 | Runtime support, libbpf compatibility, and selftest fixes including cpumask |
-| [`patches/test-coverage/`](patches/test-coverage/) | 4 | Program-iterator coverage, build dependency fixes, and optional gcov instrumentation |
+| [`patches/test-coverage/`](patches/test-coverage/) | 5 | Program-iterator coverage, build dependency fixes, and optional gcov instrumentation |
 
 All three folders participate in normal builds. The gcov markers only enable
 instrumentation when `CONFIG_GCOV_KERNEL` is set (`UML_GCOV_BUILD=1`).
+
+The separate [`patches/pahole/`](patches/pahole/) patch fixes BTF generation
+for wide scalar arguments. Normal builds apply it automatically, rebuild
+pahole when its inputs change, and regenerate kernel/module BTF. Package
+and distro CI validate it with the `tracing_struct` runtime test.
 
 The stack now uses real BPF tracing/LSM and software perf implementations,
 plus dynamic ftrace with direct calls. The former verification stubs and
@@ -237,8 +247,8 @@ python3 scripts/check_arena_expectations.py
 ```
 
 That check covers the 11 top-level arena-family objects and asserts that none
-fail at file-processing time. The current expected arena result is 60 processed
-programs: 58 success rows and 2 verifier-failure rows.
+fail at file-processing time. The current expected arena result is 66 processed
+programs: 63 success rows and 3 expected verifier-failure rows.
 
 The top-level CI expectation check uses exact failure-bucket checks plus
 minimum aggregate thresholds from `corpus_manifest.json`. It intentionally does

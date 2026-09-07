@@ -25,6 +25,11 @@ The stack is split by purpose:
 organizational; the full package and CI path still uses every folder unless
 `--clean` or `--skip-patches` is requested.
 
+[`pahole/`](pahole/) is a separate toolchain patch set, applied when building
+pahole in every mode. It is not included in the kernel stack or kernel
+patch counts. Its wide-scalar fix preserves function BTF for 128-bit tracing
+arguments.
+
 ## Patches
 
 ### 0001 — `um/x86: add BPF-attachable __x64_sys_* syscall wrappers`
@@ -617,12 +622,29 @@ files whose recorded target left the current output dir).
 
 ### 0024 — `selftests/bpf: regenerate signed lskels when the signing key changes`
 
-**Problem:** the signed-lskel rule depends only on `%.bpf.o` and bpftool;
-regenerating `tools/build/signing_key.*` leaves signed skeletons carrying
-signatures made with the old key → `-ENOKEY` at load.
+**Problem:** the signed-lskel rule does not track the private signing key;
+replacing it can leave signed skeletons carrying signatures made with
+the old key → `-ENOKEY` at load. The new upstream pin already tracks the
+verification certificate.
 
-**Fix:** add `$(PRIVATE_KEY)` and `$(VERIFICATION_CERT)` as real
-prerequisites.
+**Fix:** retain `$(PRIVATE_KEY)` as an additional prerequisite alongside
+the upstream `$(VERIFICATION_CERT)` dependency.
+
+### 0028 — `selftests/bpf: track libarena BPF build dependencies`
+
+Generate and include dependency files for regular and ASAN libarena BPF
+objects. Header changes otherwise leave stale library objects and can
+break skeleton generation with unresolved extern BTF. Making the local
+Makefile a prerequisite also rebuilds objects created before dependency
+tracking was added. Clean removes the generated dependency files.
+
+## Patch 0027 — um: fix recursive static CPU feature test
+
+Correct the `_static_cpu_has()` macro's fallback to call
+`__static_cpu_has()`. The new upstream pin accidentally calls the macro
+itself, producing an undeclared-function compilation error when the x86
+BPF JIT checks a CPU feature. The one-line correction matches the native
+x86 implementation.
 
 ## Verification Notes
 

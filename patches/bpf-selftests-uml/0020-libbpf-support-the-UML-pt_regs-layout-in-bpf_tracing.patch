@@ -1,4 +1,4 @@
-From 8173a124f4fb461123a8b726e6f7d60f173b0355 Mon Sep 17 00:00:00 2001
+From 043d7dd843bef2bb48c90bc1c72fa3bb6bdfbcd6 Mon Sep 17 00:00:00 2001
 From: Mykola Lysenko <mykolal@meta.com>
 Date: Sun, 12 Jul 2026 18:25:04 -0700
 Subject: [PATCH] libbpf: support the UML pt_regs layout in bpf_tracing.h
@@ -86,16 +86,16 @@ index dbe32a5d0..fdf10bc6f 100644
  
  #ifdef __i386__
 diff --git a/tools/testing/selftests/bpf/Makefile b/tools/testing/selftests/bpf/Makefile
-index b642ee489..bb89854bf 100644
+index 7ea5ba1df..6a41a83dd 100644
 --- a/tools/testing/selftests/bpf/Makefile
 +++ b/tools/testing/selftests/bpf/Makefile
-@@ -465,6 +465,7 @@ endif
+@@ -461,6 +461,7 @@ endif
  
  CLANG_SYS_INCLUDES = $(call get_sys_includes,$(CLANG),$(CLANG_TARGET_ARCH))
  BPF_CFLAGS = -g -Wall -Werror -D__TARGET_ARCH_$(SRCARCH) $(MENDIAN)	\
 +	     $(EXTRA_BPF_CFLAGS)						\
  	     -I$(INCLUDE_DIR) -I$(CURDIR) -I$(APIDIR)			\
- 	     -I$(CURDIR)/libarena/include				\
+ 	     -I$(TOOLSINCDIR) -I$(CURDIR)/libarena/include		\
  	     -I$(abspath $(OUTPUT)/../usr/include)			\
 -- 
 2.43.0

@@ -1,0 +1,56 @@
+From a9c951731e07e0e4185495cce77130941771348b Mon Sep 17 00:00:00 2001
+From: Mykola Lysenko <nickolay.lysenko@gmail.com>
+Date: Sun, 6 Sep 2026 21:14:48 -0700
+Subject: [PATCH] selftests/bpf: track libarena BPF object build dependencies
+
+Libarena's BPF object rules depend only on their source file. Changes
+to shared headers leave existing objects stale, so an incremental build
+can link objects using incompatible declarations. Updating bpf-next
+exposed this as a skeleton-generation failure for the bmp_test_bit
+extern, which also prevented test_progs from rebuilding.
+
+Generate and include compiler dependency files for regular and ASAN
+BPF objects, and remove them on clean. Depend on the Makefile as well
+so changed build flags and the introduction of dependency generation
+rebuild pre-existing objects which do not yet have dependency files.
+
+Signed-off-by: Mykola Lysenko <nickolay.lysenko@gmail.com>
+---
+ tools/testing/selftests/bpf/libarena/Makefile | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/tools/testing/selftests/bpf/libarena/Makefile b/tools/testing/selftests/bpf/libarena/Makefile
+index 91164d43b..5a6817f69 100644
+--- a/tools/testing/selftests/bpf/libarena/Makefile
++++ b/tools/testing/selftests/bpf/libarena/Makefile
+@@ -56,7 +56,7 @@ ASAN_FLAGS += -mllvm -asan-destructor-kind=none
+ 
+ # ENABLE_ATOMICS_TESTS required because we use arena spinlocks
+ override BPF_CFLAGS += -DENABLE_ATOMICS_TESTS
+-override BPF_CFLAGS += -O2 -g
++override BPF_CFLAGS += -O2 -g -MMD -MP
+ override BPF_CFLAGS += -Wno-incompatible-pointer-types-discards-qualifiers
+ # Required for suppressing harmless vmlinux.h-related warnings.
+ override BPF_CFLAGS += -Wno-missing-declarations
+@@ -99,13 +99,15 @@ libarena_bench.bpf.o: $(LIBARENA_BENCH_OBJECTS)
+ 	$(call msg,GEN-OBJ,libarena,$@)
+ 	$(Q)$(BPFTOOL) gen object $@ $^
+ 
+-%_asan.bpf.o: %.bpf.c
++%_asan.bpf.o: %.bpf.c Makefile
+ 	$(call msg,CLNG-BPF,libarena,$@)
+ 	$(Q)$(CLANG) $(BPF_CFLAGS) $(ASAN_FLAGS) -DBPF_ARENA_ASAN $(BPF_TARGET_ENDIAN) -c $< -o $@
+ 
+-%.bpf.o: %.bpf.c
++%.bpf.o: %.bpf.c Makefile
+ 	$(call msg,CLNG-BPF,libarena,$@)
+ 	$(Q)$(CLANG) $(BPF_CFLAGS) $(BPF_TARGET_ENDIAN) -c $< -o $@
+ 
++-include $(wildcard *.bpf.d)
++
+ clean:
+-	$(Q)rm -f *.skel.h *.bpf.o *.linked*.o
++	$(Q)rm -f *.skel.h *.bpf.o *.bpf.d *.linked*.o
+-- 
+2.43.0
+

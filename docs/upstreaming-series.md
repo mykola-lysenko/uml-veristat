@@ -14,6 +14,14 @@ posting; the local patch inventory alone does not establish either.
 | `test-coverage/0024` | Signed light skeletons retain signatures after a signing-key change | Validate key/certificate rotation regenerates skeletons and consumers |
 | `bpf-selftests-uml/0026` | Two cpumask subtests assume CPU 1 exists | Confirm two skips on a one-CPU system and execution on a multi-CPU system |
 | `uml-veristat/0025` | UML kernel-nofault reads accept guest-user addresses | Check valid kernel reads, rejected user/NULL pointers, and unmapped kernel faults |
+| `uml-veristat/0027` | UML static CPU feature macro calls itself instead of the inline helper | Check current upstream applicability and UML build coverage |
+| `test-coverage/0028` | Libarena BPF objects remain stale after header changes | Validate regular and ASAN dependency rebuilds on native builds |
+
+The separate `pahole/0001` fixes wide-scalar argument BTF and is integrated
+locally. Check a newer upstream pahole before deciding whether to submit it;
+submission remains pending the user's decision. Patch `0024` now retains
+only the private-key prerequisite because the advanced kernel pin already
+tracks the verification certificate.
 
 Start with `0023/0024` as a related selftests build-fix series. Prepare `0026`
 as a separate selftest fix and `0025` for UML review. For each, check a fresh
