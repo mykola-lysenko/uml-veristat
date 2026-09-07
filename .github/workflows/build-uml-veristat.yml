@@ -25,6 +25,9 @@ jobs:
       - name: Check kernel patch style
         run: bash scripts/check_patch_stack.sh
 
+      - name: Check LLVM installer failure handling
+        run: python3 scripts/test_install_llvm.py
+
       - name: Build uml-veristat package
         env:
           DEBIAN_FRONTEND: noninteractive

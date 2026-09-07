@@ -1,28 +1,32 @@
-# Project checkpoint — 2026-09-06
+# Project checkpoint — 2026-09-07
 
 `uml-veristat` runs BPF verification in a rootless UML guest;
 `uml-test-progs` runs the runtime selftests against the same kernel.
-The immediate work is advancing the kernel, then pahole, then LLVM in
-separate validated changes. See the [compiler investigation](llvm-upgrade-plan.md).
+The kernel, pahole, and LLVM advances are separate validated changes.
 
-## Validated kernel advancement
+## Validated dependency advancements
 
-The pin is `1b7415bf70be95b9a1e7e87d544867881065613f`
-(bpf-next, September 6, 2026; Linux 7.3-rc2). All 29 kernel patches apply
-cleanly and produce the source tree used for the successful local build.
-LLVM remains 22.1.8 locally. Pahole is advancing separately to upstream
-`416753b4`; its unpatched normal build and full runtime gate pass with
-exactly the same 623 OK / 58 FAIL / 86 SKIP results. See the [comparison](../reports/pahole-update/2026-09-07.md).
+The kernel pin is `1b7415bf70be95b9a1e7e87d544867881065613f`
+(bpf-next, September 6, 2026; Linux 7.3-rc2). All 29 patches apply cleanly.
+Upstream pahole `416753b4` fixes the wide-scalar BTF issue without the
+retired local workaround. Its isolated LLVM 22 comparison preserved every
+recorded test status: 623 OK / 58 FAIL / 86 SKIP.
 
-The standalone corpus and exact arena checks pass. The fresh runtime sweep
-records **623 OK / 58 FAIL / 86 SKIP / 0 NORESULT**, with 31 chunks and zero
-host timeouts. All four `tracing_struct` subtests pass, including the new
-128-bit argument case. Pahole source and recipe identities automatically
-invalidate stale installations and regenerate kernel/module BTF.
+LLVM **23.1.0** is now selected by `llvm-release` for local builds and CI.
+Its full sweep records **629 OK / 58 FAIL / 80 SKIP / 0 NORESULT**, with
+31 chunks and zero host timeouts. Six previously skipped stack-argument
+and aggregate-return tests pass; no pass is lost. The standalone corpus
+and exact arena checks pass, including one newly enabled arena program.
 
-See the [baseline](../reports/selftests-baseline/2026-09-06-1b7415bf7-gate.md),
-[kernel validation](../reports/bpf-next-2026-09-06.md), and
-[pahole integration](../reports/pin-update/2026-09-06-pahole-integration.md).
+Compiler identity changes rebuild compiler-dependent outputs while
+preserving the previous compiler and artifacts. Pahole identity changes
+regenerate kernel/module BTF. A parallel signing-key generation race found
+in CI is fixed in patch 0024, with a reproducer and full Makefile check.
+
+See the [baseline](../reports/selftests-baseline/2026-09-07-1b7415bf7-llvm23-gate.md),
+[kernel report](../reports/bpf-next-2026-09-06.md),
+[pahole comparison](../reports/pahole-update/2026-09-07.md), and
+[LLVM comparison](../reports/llvm-update/2026-09-07.md).
 
 ## Baseline and provenance
 
@@ -33,14 +37,16 @@ It included the cpumask fix from [PR #30](https://github.com/mykola-lysenko/uml-
 its two CPU-1-dependent subtests skip on the single-CPU guest, and the other
 34 pass. No other cpumask subtests were disabled.
 
-[`CURRENT`](../reports/selftests-baseline/CURRENT) selects the new-pin
-measurement completed on September 6 at 23:06: 766 selected names and
-767 recorded names (substring matching can report additional tests).
-The four unsupported stack-argument dummy tests now report SKIP, and
-upstream replaced one raw-tracepoint test with a passing successor.
-`verif_scale_pyperf600` gains a pass. `timer_mim` also passed in this run
-but retains its existing flake treatment. The [raw cross-pin comparison](../reports/pin-update/2026-09-06-1b7415bf7-final-comparison.json)
-preserves all changes.
+[`CURRENT`](../reports/selftests-baseline/CURRENT) selects the LLVM 23
+measurement completed September 7 at 10:50: 766 selected names and 767
+recorded names (substring matching can report additional tests).
+The preceding kernel advancement corrected four unsupported dummy tests'
+status to SKIP; LLVM 23 now enables their real programs and they pass.
+Upstream also replaced one raw-tracepoint test with a passing successor,
+and `verif_scale_pyperf600` gained a pass. `timer_mim` retains its existing
+flake treatment. The [cross-pin comparison](../reports/pin-update/2026-09-06-1b7415bf7-final-comparison.json)
+and [compiler comparison](../reports/llvm-update/2026-09-07-comparison.json)
+preserve these separate transitions.
 
 New coverage gaps include `ksock_lsm`, `ksock_lsm_verifier`, and
 `sock_xattr` (network-LSM hooks are disabled), and `verifier_percpu_addr`
@@ -87,9 +93,10 @@ the old baseline as if it were measured on the new kernel.
 
 `--jobs 2` matches the current CI sweep. `build.sh --update` deliberately
 changes the kernel pin and is a separate task requiring a new baseline.
-The kernel is pinned; exact toolchain reproduction also requires recording
-the LLVM/compiler inputs (the build supports `LLVM_RELEASE_TAG` or an
-existing LLVM installation).
+Kernel, pahole, and LLVM inputs are pinned. Installed and packaged version
+records include the actual compiler commit, archive hash, and tool identity.
+Explicit compiler comparisons can override `LLVM_RELEASE_TAG` and
+`LLVM_INSTALL`; see the LLVM report for preserved reference artifacts.
 
 ## Next work, in order
 
@@ -97,10 +104,13 @@ The kernel advancement is committed and pushed in [PR #32](https://github.com/my
 All eight checks pass at `49cab17`: [full runtime gate](https://github.com/mykola-lysenko/uml-veristat/actions/runs/34144378371),
 [package build](https://github.com/mykola-lysenko/uml-veristat/actions/runs/34144376025),
 and [all five distro builds](https://github.com/mykola-lysenko/uml-veristat/actions/runs/34144378379).
-The pinned upstream pahole passes normal-build and full-suite validation;
-commit and push that update separately. Its upstream code already
-fixes wide-scalar BTF, so the local patch is retired. Upgrade LLVM next,
-preserving the LLVM 22 reference results.
+The pahole advancement and signing-key race fix are pushed in
+[PR #33](https://github.com/mykola-lysenko/uml-veristat/pull/33), stacked on
+#32. All eight checks pass at `9e2e050`, including the full runtime gate
+and five distro builds. LLVM follows on `advance-llvm-20260907`, preserving the LLVM 22
+reference results. Each branch has independent validation; the LLVM
+report records the distinction between the local measured source tree
+and the subsequent Makefile-only signing-key fix.
 
 After those dependency updates, continue this upstream preparation queue:
 

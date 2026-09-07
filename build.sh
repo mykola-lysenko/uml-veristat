@@ -11,14 +11,14 @@
 #   bpf_test*.ko    — BPF selftest modules (auto-loaded by uml-veristat via UML_MODULES)
 #   selftests/      — BPF selftest .bpf.o files (ready inputs for uml-veristat)
 #
-# Also builds LLVM/Clang (either from source or as a pre-built nightly
+# Also builds LLVM/Clang (either from source or as a pre-built release
 # download) and pahole from source, since they are needed to build the
 # kernel and the BPF selftests tools.
 #
 # Usage:
 #   ./build.sh [--update] [--package]
 #
-#   --update        Re-fetch bpf-next and LLVM to latest tip, rebuild, and
+#   --update        Re-fetch bpf-next to its latest tip, refresh pinned LLVM, and
 #                  rewrite the bpf-next-commit pin file. Commit the pin bump
 #                  together with any corpus_manifest.json updates the new tip
 #                  requires. Without this flag, builds use the pinned commit
@@ -57,7 +57,6 @@ set -euo pipefail
 # Configurable source versions
 # ------------------------------------------------------------------------------
 LLVM_REPO="${LLVM_REPO:-https://github.com/llvm/llvm-project.git}"
-LLVM_BRANCH="${LLVM_BRANCH:-main}"                   # LLVM 23 development tip
 
 PAHOLE_REPO="${PAHOLE_REPO:-https://github.com/acmel/dwarves.git}"
 
@@ -69,13 +68,15 @@ KERNEL_BRANCH="${KERNEL_BRANCH:-master}"
 # ------------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${UML_VERISTAT_WORKDIR:-${SCRIPT_DIR}/.build}"
+LLVM_RELEASE_TAG="${LLVM_RELEASE_TAG:-$(cat "${SCRIPT_DIR}/llvm-release")}"
+LLVM_BRANCH="${LLVM_BRANCH:-${LLVM_RELEASE_TAG}}"
 PAHOLE_TAG="${PAHOLE_TAG:-$(cat "${SCRIPT_DIR}/pahole-commit")}"
 # Keep previous source and build trees available when the pin changes.
 PAHOLE_SOURCE_ID=$(printf '%s\n%s\n' "${PAHOLE_REPO}" "${PAHOLE_TAG}" | sha256sum | cut -c1-16)
 
 LLVM_SRC="${WORKDIR}/llvm-project"
 LLVM_BUILD="${WORKDIR}/llvm-build"
-LLVM_INSTALL="${LLVM_INSTALL:-${WORKDIR}/llvm-install}"
+LLVM_INSTALL="${LLVM_INSTALL:-${WORKDIR}/llvm-install-${LLVM_RELEASE_TAG#llvmorg-}}"
 PAHOLE_SRC="${WORKDIR}/dwarves-${PAHOLE_SOURCE_ID}"
 PAHOLE_BUILD="${WORKDIR}/pahole-build-${PAHOLE_SOURCE_ID}"
 PAHOLE_INSTALL="${WORKDIR}/pahole-install"
@@ -126,24 +127,6 @@ print(int(parts(sys.argv[1]) >= parts(sys.argv[2])))
 PY
 }
 
-github_api_get() {
-    local url="$1"
-    local -a curl_args=(
-        -fsSL
-        -H "Accept: application/vnd.github+json"
-        -H "X-GitHub-Api-Version: 2022-11-28"
-        -H "User-Agent: uml-veristat-build"
-    )
-
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-        curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-    elif [ -n "${GH_TOKEN:-}" ]; then
-        curl_args+=(-H "Authorization: Bearer ${GH_TOKEN}")
-    fi
-
-    curl "${curl_args[@]}" "${url}"
-}
-
 # ------------------------------------------------------------------------------
 # Parse flags
 # ------------------------------------------------------------------------------
@@ -180,12 +163,12 @@ for arg in "$@"; do
             echo "Usage: ./build.sh [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --update             Pull latest bpf-next and LLVM, then rebuild."
+            echo "  --update             Advance bpf-next and refresh pinned LLVM."
             echo "  --clean              Build against clean upstream bpf-next with no local patch stack."
             echo "  --skip-patches=LIST  Comma-separated patch prefixes to skip (e.g. 0005,0008)."
             echo "  --install-suffix=SFX Install into ~/.local/share/uml-veristat-SFX."
             echo "  --llvm-source        Build LLVM from source instead of downloading pre-built release."
-            echo "  --reuse-llvm         Keep existing LLVM/Clang even when --update is used."
+            echo "  --reuse-llvm         Reuse installed tools matching the selected LLVM release."
             echo "  --package            After building, create a distributable tarball."
             echo ""
             echo "Per-stage rebuild options (skips checking if already built):"
@@ -197,7 +180,8 @@ for arg in "$@"; do
             echo "  --rebuild-testmod    Rebuild BPF selftest modules"
             echo ""
             echo "Environment:"
-            echo "  LLVM_INSTALL=PATH   Use an existing LLVM install prefix (default: .build/llvm-install)."
+            echo "  LLVM_RELEASE_TAG    Override the release in llvm-release."
+            echo "  LLVM_INSTALL=PATH   Use an existing LLVM install prefix (default: .build/llvm-install-<version>)."
             exit 0 ;;
         *) echo "Unknown argument: ${arg}"; exit 1 ;;
     esac
@@ -253,6 +237,11 @@ skipped_patches: ${SKIP_PATCHES_RAW}
 build_distro: ${PRETTY_NAME:-${OS_ID:-unknown}}
 bpf-next: ${KERNEL_COMMIT} (${KERNEL_VERSION})
 LLVM: ${LLVM_COMMIT}
+LLVM_requested_ref: ${LLVM_REQUESTED_REF}
+LLVM_version: ${LLVM_VERSION}
+LLVM_archive: ${LLVM_ARCHIVE_URL}
+LLVM_archive_sha256: ${LLVM_ARCHIVE_SHA256}
+LLVM_build_id: ${LLVM_BUILD_ID}
 pahole: ${PAHOLE_TAG}
 pahole_source: ${PAHOLE_SOURCE_COMMIT}
 pahole_build_id: ${PAHOLE_BUILD_ID}
@@ -488,160 +477,9 @@ esac
 # Build or download LLVM/Clang
 # ------------------------------------------------------------------------------
 if [ "${LLVM_NIGHTLY}" = "1" ]; then
-    step "2/7  Downloading pre-built LLVM release"
-
-    if [ "${REUSE_LLVM}" = "1" ]; then
-        if ! clang_works; then
-            echo "ERROR: --reuse-llvm was requested, but the installed LLVM/Clang is not usable:" >&2
-            print_clang_failure
-            echo "Recovery options:" >&2
-            echo "  - remove ${LLVM_INSTALL} and re-run without --reuse-llvm to download a compatible prebuilt" >&2
-            echo "  - pin a compatible release: LLVM_RELEASE_TAG=llvmorg-<ver> ./build.sh --update --rebuild-llvm" >&2
-            echo "  - build LLVM from source: ./build.sh --llvm-source --rebuild-llvm" >&2
-            exit 1
-        fi
-        info "Reusing existing LLVM/Clang due to --reuse-llvm."
-        info "Clang: $(clang_version_line)"
-        LLVM_COMMIT="reused-$(clang_version_line)"
-    elif clang_works && [ "${REBUILD_LLVM}" != "1" ] && [ "${DO_UPDATE}" != "1" ]; then
-        info "LLVM already installed — skipping. (Use --rebuild-llvm to re-download.)"
-        LLVM_COMMIT="nightly-$(clang_version_line | grep -oP '\d+\.\d+\.\d+' | head -1)"
-    else
-        # Fetch the latest release tag and tarball URL from the GitHub API.
-        # In CI, use GITHUB_TOKEN when available to avoid anonymous API limits.
-        LLVM_RELEASE_JSON=""
-        # LLVM_RELEASE_TAG pins a specific release (e.g. llvmorg-18.1.8) instead
-        # of the latest. Useful when the newest prebuilt needs a newer
-        # libstdc++/glibc than this host has.
-        if [ -n "${LLVM_RELEASE_TAG:-}" ]; then
-            LLVM_RELEASE_API="https://api.github.com/repos/llvm/llvm-project/releases/tags/${LLVM_RELEASE_TAG}"
-        else
-            LLVM_RELEASE_API="https://api.github.com/repos/llvm/llvm-project/releases/latest"
-        fi
-        if ! LLVM_RELEASE_JSON=$(github_api_get "${LLVM_RELEASE_API}"); then
-            warn "Could not fetch LLVM release info from ${LLVM_RELEASE_API}; retrying with /releases?per_page=1"
-            LLVM_RELEASE_LIST_JSON=""
-            if LLVM_RELEASE_LIST_JSON=$(github_api_get "https://api.github.com/repos/llvm/llvm-project/releases?per_page=1"); then
-                LLVM_RELEASE_JSON=$(printf '%s' "${LLVM_RELEASE_LIST_JSON}" | python3 -c \
-                    "import sys,json; releases=json.load(sys.stdin); print(json.dumps(releases[0]))")
-            fi
-        fi
-        if [ -z "${LLVM_RELEASE_JSON}" ]; then
-            if clang_works && [ "${REBUILD_LLVM}" != "1" ]; then
-                warn "Could not fetch LLVM release info; reusing installed LLVM/Clang."
-                warn "Use --rebuild-llvm to make LLVM refresh failure fatal."
-                info "Clang: $(clang_version_line)"
-                LLVM_COMMIT="reused-$(clang_version_line)"
-            else
-                echo "ERROR: Could not fetch LLVM release info from GitHub API"
-                echo "Hint: set GITHUB_TOKEN or GH_TOKEN to avoid GitHub API rate limits"
-                exit 1
-            fi
-        fi
-        if [ -n "${LLVM_RELEASE_JSON}" ]; then
-            LLVM_TAG=$(echo "${LLVM_RELEASE_JSON}" | python3 -c \
-                "import sys,json; print(json.load(sys.stdin)['tag_name'])")
-            LLVM_VERSION=$(echo "${LLVM_TAG}" | sed 's/llvmorg-//')
-            # Accept both the new 'LLVM-<ver>-Linux-X64.tar.xz' naming and the
-            # older official 'clang+llvm-<ver>-x86_64-linux-gnu-ubuntu-<os>'
-            # naming. When a release ships several, prefer the oldest ubuntu
-            # build: it links against the oldest libstdc++/glibc and therefore
-            # runs on the widest range of hosts (newer 'Linux-X64'-only builds
-            # require GLIBCXX_3.4.30 / GCC 12+).
-            LLVM_TARBALL_URL=$(echo "${LLVM_RELEASE_JSON}" | python3 -c '
-import sys, json, re
-r = json.load(sys.stdin)
-assets = [a for a in r.get("assets", [])
-          if a["name"].endswith(".tar.xz")
-          and ("Linux-X64" in a["name"] or "x86_64-linux-gnu" in a["name"])]
-def osver(a):
-    m = re.search(r"ubuntu-(\d+)\.(\d+)", a["name"])
-    return (int(m.group(1)), int(m.group(2))) if m else (999, 0)
-assets.sort(key=osver)
-print(assets[0]["browser_download_url"] if assets else "")')
-
-            if [ -z "${LLVM_TARBALL_URL}" ]; then
-                if clang_works && [ "${REBUILD_LLVM}" != "1" ]; then
-                    warn "Could not find Linux-X64 tarball in LLVM release ${LLVM_TAG}; reusing installed LLVM/Clang."
-                    warn "Use --rebuild-llvm to make LLVM refresh failure fatal."
-                    info "Clang: $(clang_version_line)"
-                    LLVM_COMMIT="reused-$(clang_version_line)"
-                else
-                    echo "ERROR: Could not find Linux-X64 tarball in LLVM release ${LLVM_TAG}"
-                    exit 1
-                fi
-            fi
-
-            if [ -n "${LLVM_TARBALL_URL}" ]; then
-                LLVM_TARBALL="${WORKDIR}/$(basename "${LLVM_TARBALL_URL}")"
-                info "Latest LLVM release: ${LLVM_TAG} (${LLVM_VERSION})"
-                info "Tarball URL: ${LLVM_TARBALL_URL}"
-
-                LLVM_TARBALL_READY=1
-                if [ ! -f "${LLVM_TARBALL}" ]; then
-                    info "Downloading LLVM tarball (~700 MB)..."
-                    if ! curl -L --progress-bar -o "${LLVM_TARBALL}" "${LLVM_TARBALL_URL}"; then
-                        rm -f "${LLVM_TARBALL}"
-                        if clang_works && [ "${REBUILD_LLVM}" != "1" ]; then
-                            LLVM_TARBALL_READY=0
-                            warn "Could not download LLVM tarball; reusing installed LLVM/Clang."
-                            warn "Use --rebuild-llvm to make LLVM refresh failure fatal."
-                            info "Clang: $(clang_version_line)"
-                            LLVM_COMMIT="reused-$(clang_version_line)"
-                        else
-                            echo "ERROR: Could not download LLVM tarball"
-                            exit 1
-                        fi
-                    fi
-                else
-                    info "Tarball already downloaded: ${LLVM_TARBALL}"
-                fi
-
-                if [ "${LLVM_TARBALL_READY}" = "1" ]; then
-                    info "Extracting LLVM tarball..."
-                    # Extract to a staging dir and verify the new clang actually
-                    # runs on this host BEFORE replacing the current install.
-                    # Recent LLVM release binaries are built against a newer
-                    # libstdc++/glibc (e.g. GLIBCXX_3.4.30 / GCC 12) than older
-                    # hosts provide; replacing first would leave no working
-                    # compiler at all.
-                    LLVM_STAGING="${LLVM_INSTALL}.new"
-                    rm -rf "${LLVM_STAGING}"
-                    mkdir -p "${LLVM_STAGING}"
-                    tar -xf "${LLVM_TARBALL}" -C "${LLVM_STAGING}" --strip-components=1
-                    if "${LLVM_STAGING}/bin/clang" --version >/dev/null 2>&1; then
-                        rm -rf "${LLVM_INSTALL}"
-                        mv "${LLVM_STAGING}" "${LLVM_INSTALL}"
-                        info "Clang: $(${CLANG} --version | head -1)"
-                        LLVM_COMMIT="nightly-${LLVM_VERSION}"
-                    else
-                        # clang is expected to fail here; without || true the
-                        # command substitution's exit status aborts the script
-                        # under set -e before any diagnostic is printed.
-                        llvm_run_err="$("${LLVM_STAGING}/bin/clang" --version 2>&1 | head -1 || true)"
-                        rm -rf "${LLVM_STAGING}"
-                        warn "Downloaded LLVM ${LLVM_VERSION} cannot run on this host:"
-                        warn "  ${llvm_run_err}"
-                        warn "The prebuilt needs a newer libstdc++/glibc than this host provides."
-                        if clang_works && [ "${REBUILD_LLVM}" != "1" ]; then
-                            warn "Keeping the existing working LLVM/Clang install."
-                            info "Clang: $(clang_version_line)"
-                            LLVM_COMMIT="reused-$(clang_version_line)"
-                            LLVM_TARBALL_READY=0
-                        else
-                            echo "ERROR: No usable LLVM/Clang for this host." >&2
-                            echo "  Host max GLIBCXX: $(strings /lib64/libstdc++.so.6 2>/dev/null | grep -oE 'GLIBCXX_3\.4\.[0-9]+' | sort -V | tail -1)" >&2
-                            echo "  Recovery options:" >&2
-                            echo "    - pin an older, compatible release: LLVM_RELEASE_TAG=llvmorg-<ver> ./build.sh --update --rebuild-llvm" >&2
-                            echo "    - build LLVM from source on this host: ./build.sh --llvm-source --rebuild-llvm" >&2
-                            echo "    - install a newer toolchain (GCC 12+ / libstdc++)." >&2
-                            exit 1
-                        fi
-                    fi
-                fi
-            fi
-        fi
-    fi
+    step "2/7  Installing pinned LLVM release ${LLVM_RELEASE_TAG}"
+    REUSE_LLVM="${REUSE_LLVM}" REBUILD_LLVM="${REBUILD_LLVM}" DO_UPDATE="${DO_UPDATE}" \
+        bash "${SCRIPT_DIR}/scripts/install_llvm.sh" "${LLVM_RELEASE_TAG}" "${WORKDIR}" "${LLVM_INSTALL}"
 else
     step "2/7  Building LLVM/Clang (${LLVM_BRANCH} branch, BPF+X86 only)"
     info "This is the longest step — ~25 min on 8 cores, ~45 min on 4 cores."
@@ -649,13 +487,20 @@ else
     if [ ! -d "${LLVM_SRC}/.git" ]; then
         info "Cloning LLVM (shallow)..."
         git clone --depth=1 --branch "${LLVM_BRANCH}" "${LLVM_REPO}" "${LLVM_SRC}"
-    elif [ "${DO_UPDATE}" = "1" ]; then
-        info "Updating LLVM to latest ${LLVM_BRANCH}..."
+    elif [ "${DO_UPDATE}" = "1" ] || [ "${REBUILD_LLVM}" = "1" ] || \
+         [ "$(git -C "${LLVM_SRC}" rev-parse HEAD)" != \
+           "$(git -C "${LLVM_SRC}" rev-parse --verify "${LLVM_BRANCH}^{commit}" 2>/dev/null || true)" ]; then
+        if ! git -C "${LLVM_SRC}" diff --quiet HEAD --; then
+            echo "ERROR: LLVM source has local edits; refusing to change its revision." >&2
+            exit 1
+        fi
+        info "Selecting LLVM source ref ${LLVM_BRANCH}..."
         git -C "${LLVM_SRC}" fetch --depth=1 origin "${LLVM_BRANCH}"
-        git -C "${LLVM_SRC}" reset --hard "origin/${LLVM_BRANCH}"
+        git -C "${LLVM_SRC}" checkout --detach FETCH_HEAD
+        REBUILD_LLVM=1
     fi
 
-    LLVM_COMMIT=$(git -C "${LLVM_SRC}" rev-parse --short HEAD)
+    LLVM_COMMIT=$(git -C "${LLVM_SRC}" rev-parse HEAD)
     info "LLVM HEAD: ${LLVM_COMMIT}"
 
     if ! clang_works || [ "${REBUILD_LLVM}" = "1" ] || [ "${DO_UPDATE}" = "1" ]; then
@@ -720,11 +565,34 @@ else
             2>&1 | tail -5
         ninja -C "${LLVM_BUILD}" -j"$(nproc)" clang llc lld llvm-strip llvm-objcopy
         ninja -C "${LLVM_BUILD}" install
+        rm -f "${LLVM_INSTALL}/.uml-llvm-release.json"
         info "Clang: $(clang_version_line)"
     else
         info "Clang already built — skipping. (Use --update to rebuild.)"
     fi
 fi
+
+# Record the compiler actually used, even when an unrelated source checkout exists.
+LLVM_REQUESTED_REF="${LLVM_RELEASE_TAG}"
+if [ "${LLVM_NIGHTLY}" != 1 ]; then
+    LLVM_REQUESTED_REF="${LLVM_BRANCH}"
+fi
+LLVM_VERSION=$("${CLANG}" -dumpversion)
+LLVM_COMMIT=$(clang_version_line | python3 -c 'import re,sys; s=sys.stdin.read().strip(); m=re.search(r"\b[0-9a-f]{40}\b",s); print(m.group(0) if m else s)')
+LLVM_ARCHIVE_URL="unrecorded (existing or source-built compiler)"
+LLVM_ARCHIVE_SHA256="unrecorded"
+if [ -f "${LLVM_INSTALL}/.uml-llvm-release.json" ]; then
+    LLVM_ARCHIVE_URL=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive_url"])' "${LLVM_INSTALL}/.uml-llvm-release.json")
+    LLVM_ARCHIVE_SHA256=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive_sha256"])' "${LLVM_INSTALL}/.uml-llvm-release.json")
+fi
+LLVM_BUILD_ID=$(
+    {
+        printf '%s\n' "${LLVM_COMMIT}" "${LLVM_VERSION}" "${LLVM_ARCHIVE_SHA256}"
+        sha256sum "${CLANG}" "${LLC}" "${LLVM_INSTALL}/bin/llvm-config" \
+            "${LLVM_INSTALL}/bin/llvm-strip" "${LLVM_INSTALL}/bin/llvm-objcopy" | cut -d ' ' -f1
+    } | sha256sum | cut -d ' ' -f1
+)
+info "Clang: $(clang_version_line)"
 
 # ------------------------------------------------------------------------------
 # Build pahole from source
@@ -1305,6 +1173,33 @@ if ! "${BUILD_LD}" --version >/dev/null 2>&1; then
 fi
 export LD="${BUILD_LD}"
 
+# Make does not reliably track compiler changes, including libarena objects
+# emitted inside the source tree. Preserve the old comparison artifacts and
+# start compiler-dependent outputs afresh when the actual tool identity changes.
+LLVM_ARTIFACT_STAMP="${WORKDIR}/llvm-artifact-id${MODE_SUFFIX}"
+if [ "${REBUILD_LLVM}" = "1" ] || [ ! -f "${LLVM_ARTIFACT_STAMP}" ] || \
+   [ "$(cat "${LLVM_ARTIFACT_STAMP}")" != "${LLVM_BUILD_ID}" ]; then
+    LLVM_ARTIFACT_ARCHIVE=$(mktemp -d "${WORKDIR}/previous-llvm-artifacts${MODE_SUFFIX}.XXXXXX")
+    for output in "${BPFTOOL_OUTPUT}" "${SELFTESTS_OUTPUT}"; do
+        if [ -d "${output}" ]; then
+            mv "${output}" "${LLVM_ARTIFACT_ARCHIVE}/$(basename "${output}")"
+        fi
+        mkdir -p "${output}"
+    done
+    LIBARENA_DIR="${SELFTESTS_DIR}/libarena"
+    if [ -d "${LIBARENA_DIR}" ]; then
+        mkdir -p "${LLVM_ARTIFACT_ARCHIVE}/libarena"
+        for output in "${LIBARENA_DIR}"/*.bpf.o "${LIBARENA_DIR}"/*.bpf.d \
+                      "${LIBARENA_DIR}"/*.skel.h "${LIBARENA_DIR}"/*.linked*.o; do
+            [ ! -f "${output}" ] || mv "${output}" "${LLVM_ARTIFACT_ARCHIVE}/libarena/"
+        done
+    fi
+    rm -f "${LLVM_ARTIFACT_STAMP}"
+    REBUILD_BPFTOOL=1
+    REBUILD_SELFTESTS=1
+    info "Compiler identity changed; previous artifacts retained at ${LLVM_ARTIFACT_ARCHIVE}"
+fi
+
 # --- 7a: build bpftool from the same tree ---
 BPFTOOL_BIN="${BPFTOOL_OUTPUT}/bpftool"
 mkdir -p "${BPFTOOL_OUTPUT}"
@@ -1484,6 +1379,9 @@ fi
 if [ "${TESTMOD_BUILD_FAILED}" = "0" ]; then
     printf '%s\n' "${PAHOLE_BUILD_ID}" > "${KERNEL_PAHOLE_STAMP}"
 fi
+if [ -x "${TEST_PROGS_BIN}" ]; then
+    printf '%s\n' "${LLVM_BUILD_ID}" > "${LLVM_ARTIFACT_STAMP}"
+fi
 
 echo ""
 info "Build complete!"
@@ -1567,11 +1465,7 @@ if [ "${DO_PACKAGE}" = "1" ]; then
 
     # --- Full provenance record ---
     KERNEL_COMMIT_FULL=$(git -C "${LINUX_DIR}" rev-parse HEAD)
-    if [ -d "${LLVM_SRC}/.git" ]; then
-        LLVM_COMMIT_FULL=$(git -C "${LLVM_SRC}" rev-parse HEAD)
-    else
-        LLVM_COMMIT_FULL="${LLVM_COMMIT}"  # nightly: already set to nightly-<version>
-    fi
+    LLVM_COMMIT_FULL="${LLVM_COMMIT}"
     cat > "${PKG_DIR}/version.txt" <<VEOF
 Built:        $(date -u +"%Y-%m-%d %H:%M UTC")
 Mode:         ${BUILD_FLAVOR}
@@ -1581,6 +1475,11 @@ Build distro: ${PRETTY_NAME:-${OS_ID:-unknown}}
 bpf-next:     ${KERNEL_COMMIT_FULL}
 bpf-next tag: ${KERNEL_VERSION}
 LLVM:         ${LLVM_COMMIT_FULL}
+LLVM requested ref: ${LLVM_REQUESTED_REF}
+LLVM version: ${LLVM_VERSION}
+LLVM archive: ${LLVM_ARCHIVE_URL}
+LLVM archive sha256: ${LLVM_ARCHIVE_SHA256}
+LLVM build id: ${LLVM_BUILD_ID}
 pahole:       ${PAHOLE_TAG}
 pahole source: ${PAHOLE_SOURCE_COMMIT}
 pahole build id: ${PAHOLE_BUILD_ID}

@@ -1,0 +1,38 @@
+{
+  "before": {
+    "OK": 623,
+    "SKIP": 86,
+    "FAIL": 58
+  },
+  "after": {
+    "OK": 629,
+    "SKIP": 80,
+    "FAIL": 58
+  },
+  "transitions": {
+    "verifier_aggregate_ret": {
+      "before": "SKIP",
+      "after": "OK"
+    },
+    "stack_arg": {
+      "before": "SKIP",
+      "after": "OK"
+    },
+    "stack_arg_fail": {
+      "before": "SKIP",
+      "after": "OK"
+    },
+    "stack_arg_precision": {
+      "before": "SKIP",
+      "after": "OK"
+    },
+    "verifier_stack_arg": {
+      "before": "SKIP",
+      "after": "OK"
+    },
+    "verifier_stack_arg_order": {
+      "before": "SKIP",
+      "after": "OK"
+    }
+  }
+}

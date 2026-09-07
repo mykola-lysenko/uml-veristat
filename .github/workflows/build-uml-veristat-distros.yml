@@ -11,6 +11,7 @@ on:
       - 'corpus_manifest.json'
       - 'bpf-next-commit'
       - 'pahole-commit'
+      - 'llvm-release'
       - '.github/workflows/build-uml-veristat-distros.yml'
   push:
     tags:
