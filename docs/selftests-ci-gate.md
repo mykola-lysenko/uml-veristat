@@ -2,8 +2,8 @@
 
 Goal: every PR proves it did not regress test_progs coverage against the
 committed baseline selected by `reports/selftests-baseline/CURRENT`
-(623 OK / 58 FAIL / 86 SKIP / 0 NORESULT at pin `1b7415bf7`, measured
-2026-09-06 after pahole integration). See
+(629 OK / 58 FAIL / 80 SKIP / 0 NORESULT at pin `1b7415bf7`, measured
+2026-09-07 with LLVM 23.1.0). See
 [project status](project-status.md) for measurement provenance and flake
 handling. New passes ratchet the baseline upward; lost passes fail CI.
 

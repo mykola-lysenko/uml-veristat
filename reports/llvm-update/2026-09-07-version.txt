@@ -1,0 +1,15 @@
+Built: 2026-09-07 17:24 UTC
+mode: patched
+skipped_patches:
+build_distro: Ubuntu 24.04.4 LTS
+bpf-next: 1b7415bf7 (7.3.0-rc2)
+LLVM: ea7d852a70e8bdfaf601d6626a760f9771b2c4b4
+LLVM_requested_ref: llvmorg-23.1.0
+LLVM_version: 23.1.0
+LLVM_archive: https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.0/LLVM-23.1.0-Linux-X64.tar.xz
+LLVM_archive_sha256: 18da30f77f475688a18f7704d23f9f155ae007ed9922dbed6850a9419d9fec8c
+LLVM_build_id: 5708b0d1587288ed2f76f55555ba45a7219a49805efa9983485ad9d92d798078
+pahole: 416753b4ba90fe3b72952ace9954edb321657936
+pahole_source: 416753b4ba90fe3b72952ace9954edb321657936
+pahole_build_id: a9b7301d8f58833eba5c167f378f9a1e9596a7ef12f2a5c4f6a3dfb6b22d1150
+bpf_test_modules: available: bpf_testmod.ko bpf_test_modorder_x.ko bpf_test_modorder_y.ko

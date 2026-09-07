@@ -1,0 +1,19 @@
+make: Entering directory '/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/testing/selftests/bpf'
+
+Auto-detecting system features:
+...                                    llvm: [ [32mon[m  ]
+
+/home/prozak/sources/bpf-uml-selftests/.build/llvm-23.1.0-staging/bin/clang  \
+	     -g -O0 -rdynamic -std=gnu11 -Wall -Werror -fno-omit-frame-pointer -Wno-unused-but-set-variable -DHAVE_GENHDR -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/testing/selftests/bpf -I/home/prozak/sources/bpf-uml-selftests/.build/llvm-23.1.0-host-link-check/tools/include -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/include/generated -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/lib -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/include -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/arch/x86/include -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/include/uapi -I/home/prozak/sources/bpf-uml-selftests/.build/llvm-23.1.0-host-link-check -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/testing/selftests/bpf/libarena/include \
+	     urandom_read_lib1.c urandom_read_lib2.c -lelf -lz -lrt -lpthread \
+	     -Wno-unused-command-line-argument \
+	     -fuse-ld=/usr/bin/ld -Wl,-znoseparate-code -Wl,--build-id=sha1 \
+	     -Wl,--version-script=liburandom_read.map \
+	     -fPIC -shared -o /home/prozak/sources/bpf-uml-selftests/.build/llvm-23.1.0-host-link-check/liburandom_read.so
+/home/prozak/sources/bpf-uml-selftests/.build/llvm-23.1.0-staging/bin/clang  \
+	     -g -O0 -rdynamic -std=gnu11 -Wall -Werror -fno-omit-frame-pointer -Wno-unused-but-set-variable -DHAVE_GENHDR -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/testing/selftests/bpf -I/home/prozak/sources/bpf-uml-selftests/.build/llvm-23.1.0-host-link-check/tools/include -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/include/generated -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/lib -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/include -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/arch/x86/include -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/include/uapi -I/home/prozak/sources/bpf-uml-selftests/.build/llvm-23.1.0-host-link-check -I/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/testing/selftests/bpf/libarena/include urandom_read.c urandom_read_aux.c \
+	     -Wno-unused-command-line-argument \
+	     -lurandom_read -lelf -lz -lrt -lpthread -L/home/prozak/sources/bpf-uml-selftests/.build/llvm-23.1.0-host-link-check \
+	     -fuse-ld=/usr/bin/ld -Wl,-znoseparate-code -Wl,--build-id=sha1 \
+	     -Wl,-rpath=. -o /home/prozak/sources/bpf-uml-selftests/.build/llvm-23.1.0-host-link-check/urandom_read
+make: Leaving directory '/home/prozak/sources/bpf-uml-selftests/.build/bpf-next/tools/testing/selftests/bpf'

@@ -10,6 +10,7 @@ on:
       - 'corpus_manifest.json'
       - 'bpf-next-commit'
       - 'pahole-commit'
+      - 'llvm-release'
       - 'reports/selftests-baseline/**'
       - '.github/workflows/selftests-gate.yml'
   push:

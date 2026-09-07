@@ -8,17 +8,18 @@ It allows you to test BPF programs against that upstream verifier without needin
 
 The [project status and roadmap](docs/project-status.md) records the kernel
 pin, validation evidence, supported capabilities, and next work.
-The runtime baseline on Linux 7.3-rc2 is **623 OK / 58 FAIL / 86 SKIP /
-0 NORESULT**, measured in a fresh full sweep with LLVM 22.1.8. See the
-[baseline report](reports/selftests-baseline/2026-09-06-1b7415bf7-gate.md)
-for provenance, the four upstream dummy-test reporting corrections, and
-known coverage gaps. The denylist and `timer_mim` flake policy are unchanged.
+The runtime baseline on Linux 7.3-rc2 is **629 OK / 58 FAIL / 80 SKIP /
+0 NORESULT**, measured with LLVM 23.1.0. Six tests gain real passing
+coverage and no passes are lost. See the
+[baseline report](reports/selftests-baseline/2026-09-07-1b7415bf7-llvm23-gate.md)
+and [LLVM comparison](reports/llvm-update/2026-09-07.md).
+The denylist and `timer_mim` flake policy are unchanged.
 
-The normal build uses the upstream revision in [`pahole-commit`](pahole-commit).
-It already fixes the 128-bit tracing case, so the local pahole patch has
-been retired. See the [upstream comparison](reports/pahole-update/2026-09-07.md).
-The full pahole comparison preserves every recorded test status. LLVM is
-the next dependency update.
+Normal builds select [`llvm-release`](llvm-release) and
+[`pahole-commit`](pahole-commit). Upstream pahole already fixes the
+128-bit tracing case, so the local workaround is retired. Its isolated
+comparison preserved every recorded test status; see the
+[upstream comparison](reports/pahole-update/2026-09-07.md).
 
 ## How it works
 
@@ -41,7 +42,7 @@ cd uml-veristat
 
 ### What `build.sh` does
 1. Installs host build dependencies (`apt`, `dnf`, `zypper`, or `pacman`).
-2. Downloads a pre-built LLVM/Clang release from GitHub (or builds from source with `--llvm-source`).
+2. Downloads the LLVM/Clang release in `llvm-release` and verifies its published archive digest (or builds that tag from source with `--llvm-source`).
 3. Builds `pahole` from the upstream revision in `pahole-commit`.
 4. Clones `bpf-next` and checks out the committed kernel pin.
 5. Applies the UML/BPF patch stack (see [`patches/`](patches/)).
@@ -53,6 +54,12 @@ The selftests build runs in keep-going mode. A small set of UML-incompatible or
 upstream-drifting selftests can fail to compile without aborting the overall
 install. The supported standalone corpus is tracked by
 `scripts/report_coverage.py`.
+
+LLVM installs into `.build/llvm-install-<version>`. An update preserves the
+previous compiler and archives its generated selftest outputs for comparison.
+Use `LLVM_RELEASE_TAG=llvmorg-<version>` for an explicit release override;
+`LLVM_INSTALL=... --reuse-llvm` requires tools matching that selected release.
+`--update` refreshes the selected LLVM release while advancing the kernel pin.
 
 *Note: The initial build takes about 15–20 minutes depending on your CPU and network speed. Subsequent `./build.sh` runs reuse build artifacts. `--update` explicitly advances the kernel pin and requires a new regression baseline.*
 

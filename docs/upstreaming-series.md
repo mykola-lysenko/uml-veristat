@@ -11,7 +11,7 @@ posting; the local patch inventory alone does not establish either.
 | Patch | Problem addressed | Preparation needed |
 |-------|-------------------|--------------------|
 | `test-coverage/0023` | Flavored selftest objects miss their own generated skeleton dependencies | Validate incremental rebuilds across flavors, including native builds |
-| `test-coverage/0024` | Signed light skeletons retain signatures after a signing-key change | Validate key/certificate rotation regenerates skeletons and consumers |
+| `test-coverage/0024` | Parallel key generation can mismatch signed skeletons; private-key changes also need dependencies | Validate key/certificate rotation regenerates skeletons and consumers |
 | `bpf-selftests-uml/0026` | Two cpumask subtests assume CPU 1 exists | Confirm two skips on a one-CPU system and execution on a multi-CPU system |
 | `uml-veristat/0025` | UML kernel-nofault reads accept guest-user addresses | Check valid kernel reads, rejected user/NULL pointers, and unmapped kernel faults |
 | `uml-veristat/0027` | UML static CPU feature macro calls itself instead of the inline helper | Check current upstream applicability and UML build coverage |
@@ -20,8 +20,10 @@ posting; the local patch inventory alone does not establish either.
 The separate `pahole/0001` workaround is retired: unpatched upstream
 master fixes the wide-scalar tracing case, so it does not need submission.
 See the [comparison](../reports/pahole-update/2026-09-07.md). Patch `0024`
-retains only the private-key prerequisite because the advanced kernel pin
-already tracks the verification certificate.
+retains the private-key prerequisite because the advanced kernel pin
+already tracks the verification certificate. It also serializes key-pair
+generation and derives the DER certificate from the private-key PEM; see
+the [parallel race validation](../reports/pahole-update/2026-09-07-key-generation-race.md).
 
 Start with `0023/0024` as a related selftests build-fix series. Prepare `0026`
 as a separate selftest fix and `0025` for UML review. For each, check a fresh

@@ -1,0 +1,8 @@
+{
+  "release": "llvmorg-23.1.0",
+  "archive_url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.0/LLVM-23.1.0-Linux-X64.tar.xz",
+  "archive_sha256": "18da30f77f475688a18f7704d23f9f155ae007ed9922dbed6850a9419d9fec8c",
+  "archive_digest_verified": true,
+  "clang_version": "clang version 23.1.0 (https://github.com/llvm/llvm-project ea7d852a70e8bdfaf601d6626a760f9771b2c4b4)",
+  "commit": "ea7d852a70e8bdfaf601d6626a760f9771b2c4b4"
+}

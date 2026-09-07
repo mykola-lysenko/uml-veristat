@@ -141,10 +141,10 @@
     "expected_metrics": {
       "input_files": 11,
       "processed_files": 11,
-      "processed_programs": 66,
+      "processed_programs": 67,
       "skipped_files": 0,
       "skipped_programs": 0,
-      "success_rows": 63,
+      "success_rows": 64,
       "failure_rows": 3
     },
     "expected_failed_process": {},

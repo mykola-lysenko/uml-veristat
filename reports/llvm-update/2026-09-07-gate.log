@@ -1,0 +1,51 @@
+gate: running full sweep: /usr/bin/python3 /home/prozak/sources/bpf-uml-selftests/scripts/run_test_chunks.py --out-dir .build/test-logs/llvm-23.1.0-20260907 --jobs 2
+chunk 000/30: rc=1 27.7s
+chunk 002/30: rc=1 17.5s
+chunk 001/30: rc=1 63.7s
+chunk 003/30: rc=1 40.7s
+chunk 004/30: rc=1 44.2s
+chunk 005/30: rc=1 30.3s
+chunk 007/30: rc=1 24.7s
+chunk 006/30: rc=1 73.6s
+chunk 009/30: rc=1 64.1s
+chunk 010/30: rc=1 43.3s
+chunk 008/30: rc=1 158.3s
+chunk 012/30: rc=1 27.6s
+chunk 011/30: rc=0 44.2s
+chunk 014/30: rc=0 3.1s
+chunk 013/30: rc=1 13.5s
+chunk 015/30: rc=0 14.1s
+chunk 017/30: rc=1 42.0s
+chunk 016/30: rc=1 70.8s
+chunk 019/30: rc=1 28.0s
+chunk 018/30: rc=1 50.3s
+chunk 020/30: rc=1 107.7s
+chunk 021/30: rc=1 202.6s
+chunk 023/30: rc=0 9.2s
+chunk 024/30: rc=1 21.4s
+chunk 022/30: rc=1 140.7s
+chunk 026/30: rc=1 41.7s
+chunk 025/30: rc=0 68.1s
+chunk 027/30: rc=1 43.3s
+chunk 028/30: rc=0 33.1s
+chunk 030/30: rc=0 65.2s
+chunk 029/30: rc=1 100.8s
+
+wrote .build/test-logs/llvm-23.1.0-20260907/summary.json and summary.md
+counts: {"OK": 629, "SKIP": 80, "FAIL": 58}
+# Selftests gate — PASS
+
+- baseline: `2026-09-06-1b7415bf7-gate.json` (OK 623 / FAIL 58 / SKIP 86)
+- run: OK 629 / FAIL 58 / SKIP 80, 31 chunks, 0 timeout(s)
+- pin: `1b7415bf7` matches `bpf-next-commit`
+
+## New passes (6) — ratchet with `--write-baseline`
+
+- `stack_arg`: SKIP → OK
+- `stack_arg_fail`: SKIP → OK
+- `stack_arg_precision`: SKIP → OK
+- `verifier_aggregate_ret`: SKIP → OK
+- `verifier_stack_arg`: SKIP → OK
+- `verifier_stack_arg_order`: SKIP → OK
+
+_FLAKY list has 1 entrie(s) — work to burn it down._

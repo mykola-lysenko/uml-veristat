@@ -1,5 +1,9 @@
 # LLVM investigation — 2026-09-06
 
+Historical investigation, completed by the [LLVM 23.1.0 update](../reports/llvm-update/2026-09-07.md).
+The observations below describe the pre-upgrade state. The current pin,
+build behavior, and six new runtime passes are recorded in that report.
+
 The proposed next compiler is **LLVM 23.1.0**, with an explicit shared pin
 for local builds and CI. This is an investigation and validation plan;
 the local compiler has not been upgraded.

@@ -1,0 +1,75 @@
+{
+  "clang": {
+    "rc": 0,
+    "version": [
+      "clang version 23.1.0 (https://github.com/llvm/llvm-project ea7d852a70e8bdfaf601d6626a760f9771b2c4b4)",
+      "Target: x86_64-unknown-linux-gnu"
+    ]
+  },
+  "llc": {
+    "rc": 0,
+    "version": [
+      "LLVM (http://llvm.org/):",
+      "  LLVM version 23.1.0"
+    ]
+  },
+  "ld.lld": {
+    "rc": 127,
+    "version": [
+      "/home/prozak/sources/bpf-uml-selftests/.build/llvm-23.1.0-staging/bin/ld.lld: error while loading shared libraries: libicui18n.so.70: cannot open shared object file: No such file or directory"
+    ]
+  },
+  "llvm-config": {
+    "rc": 0,
+    "version": [
+      "23.1.0"
+    ]
+  },
+  "llvm-strip": {
+    "rc": 0,
+    "version": [
+      "llvm-strip, compatible with GNU strip",
+      "LLVM (http://llvm.org/):"
+    ]
+  },
+  "llvm-objcopy": {
+    "rc": 0,
+    "version": [
+      "llvm-objcopy, compatible with GNU objcopy",
+      "LLVM (http://llvm.org/):"
+    ]
+  },
+  "llvm22_bpf_features": [
+    "#define __BPF_FEATURE_ADDR_SPACE_CAST 1",
+    "#define __BPF_FEATURE_ALU32 1",
+    "#define __BPF_FEATURE_ATOMIC_MEM_ORDERING 1",
+    "#define __BPF_FEATURE_BSWAP 1",
+    "#define __BPF_FEATURE_GOTOL 1",
+    "#define __BPF_FEATURE_GOTOX 1",
+    "#define __BPF_FEATURE_JMP32 1",
+    "#define __BPF_FEATURE_JMP_EXT 1",
+    "#define __BPF_FEATURE_LDSX 1",
+    "#define __BPF_FEATURE_LOAD_ACQ_STORE_REL 1",
+    "#define __BPF_FEATURE_MAY_GOTO 1",
+    "#define __BPF_FEATURE_MOVSX 1",
+    "#define __BPF_FEATURE_SDIV_SMOD 1",
+    "#define __BPF_FEATURE_ST 1"
+  ],
+  "llvm23_bpf_features": [
+    "#define __BPF_FEATURE_ADDR_SPACE_CAST 1",
+    "#define __BPF_FEATURE_ALU32 1",
+    "#define __BPF_FEATURE_ATOMIC_MEM_ORDERING 1",
+    "#define __BPF_FEATURE_BSWAP 1",
+    "#define __BPF_FEATURE_GOTOL 1",
+    "#define __BPF_FEATURE_GOTOX 1",
+    "#define __BPF_FEATURE_JMP32 1",
+    "#define __BPF_FEATURE_JMP_EXT 1",
+    "#define __BPF_FEATURE_LDSX 1",
+    "#define __BPF_FEATURE_LOAD_ACQ_STORE_REL 1",
+    "#define __BPF_FEATURE_MAY_GOTO 1",
+    "#define __BPF_FEATURE_MOVSX 1",
+    "#define __BPF_FEATURE_SDIV_SMOD 1",
+    "#define __BPF_FEATURE_ST 1",
+    "#define __BPF_FEATURE_STACK_ARGUMENT 1"
+  ]
+}
