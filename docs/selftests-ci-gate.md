@@ -1,8 +1,11 @@
 # Selftests CI regression gate — design
 
 Goal: every PR proves it did not regress test_progs coverage against the
-committed baseline (509 OK / 150 FAIL / 77 SKIP / 0 NORESULT at pin
-520d7d794). New passes ratchet the baseline upward; lost passes fail CI.
+committed baseline selected by `reports/selftests-baseline/CURRENT`
+(604 OK / 56 FAIL / 76 SKIP / 0 NORESULT at pin `520d7d794`, adopted
+2026-09-06 from the August 1 cpumask sweep). See
+[project status](project-status.md) for measurement provenance and flake
+handling. New passes ratchet the baseline upward; lost passes fail CI.
 
 ## Decision: full run per PR, no subset
 
@@ -82,6 +85,10 @@ must never become background noise again.
   summary to a new dated file and updates CURRENT. New passes never
   auto-ratchet in CI; the PR author runs `--write-baseline` locally so the
   diff is reviewed like any other change.
+  The writer copies raw results, including flaky-listed statuses; it does
+  not normalize counts or merge standalone retry results. Verify a PASS
+  verdict before adopting a run. When adopting an older summary, document
+  its measurement date separately from the adoption date in the filename.
 
 ## CI wiring
 
@@ -107,7 +114,7 @@ build workflow's every-push behavior untouched):
   chunk-index order, so output is deterministic and identical to a serial
   run (validated: -j6 local sweep bit-identical to serial, 18.7 → 4.0 min).
   Timed-out chunks are killed by session id so parallel neighbors survive.
-  CI uses `--jobs 3`.
+  CI uses `--jobs 2` (reduced from 3 on 2026-07-31).
 - **ccache**: `UML_BUILD_CCACHE=1` makes build.sh masquerade gcc/cc via
   PATH and wrap clang in a cached single-word wrapper; the workflow
   persists `.ccache` through actions/cache keyed on pin+patches.

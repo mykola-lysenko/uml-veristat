@@ -1,8 +1,15 @@
 UML BPF selftests follow-ups
 ============================
 
-Current objective
------------------
+Historical investigation log
+----------------------------
+The findings below describe the July 2026 investigation, including fixes
+that were later superseded. They are retained as evidence, not an active
+checklist. Current status, baseline, and priorities: docs/project-status.md.
+The cpumask fix is integrated and its baseline was adopted on 2026-09-06.
+
+Original objective
+------------------
 Build and run the full BPF selftests test_progs binary inside the current
 uml-veristat UML kernel, then produce a fresh pass/fail/skip baseline.
 

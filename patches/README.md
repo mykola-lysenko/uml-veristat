@@ -569,6 +569,19 @@ bounded span (`< end_vm`) was tried first and broke those tests plus
 `xdp_attach`'s tracepoint-context reads. Coverage-driven find
 (helpers.c cold-function triage); upstream-ready for linux-um.
 
+## Patch 0026 — selftests/bpf: skip cpumask subtests requiring CPU 1
+
+**File:** `tools/testing/selftests/bpf/prog_tests/cpumask.c`
+
+`test_and_or_xor` and `test_intersects_subset` assert on CPU 1 being set.
+On a system with only one possible CPU, setting that bit is a no-op, so
+those assertions fail despite correct kfunc behavior. Skip these two
+subtests when `libbpf_num_possible_cpus()` returns fewer than two.
+
+The recorded UML sweep reports `cpumask:OK (SKIP: 2/36)`, with the other
+34 subtests passing. This fix is integrated through PR #30; see the
+[checkpoint](../docs/project-status.md) for baseline and CI evidence.
+
 ## test-coverage/ patches (coverage campaign, upstream-destined)
 
 ### 0021 — `selftests/bpf: exercise the bpf_prog object iterator end to end`
