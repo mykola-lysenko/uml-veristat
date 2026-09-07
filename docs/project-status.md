@@ -10,12 +10,14 @@ separate validated changes. See the [compiler investigation](llvm-upgrade-plan.m
 The pin is `1b7415bf70be95b9a1e7e87d544867881065613f`
 (bpf-next, September 6, 2026; Linux 7.3-rc2). All 29 kernel patches apply
 cleanly and produce the source tree used for the successful local build.
-LLVM remains 22.1.8 locally; pahole remains v1.31 with a local correction.
+LLVM remains 22.1.8 locally. Pahole is advancing separately to upstream
+`416753b4`; its unpatched normal build and full runtime gate pass with
+exactly the same 623 OK / 58 FAIL / 86 SKIP results. See the [comparison](../reports/pahole-update/2026-09-07.md).
 
 The standalone corpus and exact arena checks pass. The fresh runtime sweep
 records **623 OK / 58 FAIL / 86 SKIP / 0 NORESULT**, with 31 chunks and zero
 host timeouts. All four `tracing_struct` subtests pass, including the new
-128-bit argument case. Pahole source and patch identities automatically
+128-bit argument case. Pahole source and recipe identities automatically
 invalidate stale installations and regenerate kernel/module BTF.
 
 See the [baseline](../reports/selftests-baseline/2026-09-06-1b7415bf7-gate.md),
@@ -91,11 +93,14 @@ existing LLVM installation).
 
 ## Next work, in order
 
-First commit and push the validated bpf-next advancement. Then check and
-advance upstream pahole, testing whether it already fixes wide-scalar BTF;
-retain the local correction only if needed. Upgrade LLVM after the pahole
-comparison, preserving the LLVM 22 reference results. Submission of the
-pahole correction remains a separate user decision.
+The kernel advancement is committed and pushed in [PR #32](https://github.com/mykola-lysenko/uml-veristat/pull/32).
+All eight checks pass at `49cab17`: [full runtime gate](https://github.com/mykola-lysenko/uml-veristat/actions/runs/34144378371),
+[package build](https://github.com/mykola-lysenko/uml-veristat/actions/runs/34144376025),
+and [all five distro builds](https://github.com/mykola-lysenko/uml-veristat/actions/runs/34144378379).
+The pinned upstream pahole passes normal-build and full-suite validation;
+commit and push that update separately. Its upstream code already
+fixes wide-scalar BTF, so the local patch is retired. Upgrade LLVM next,
+preserving the LLVM 22 reference results.
 
 After those dependency updates, continue this upstream preparation queue:
 

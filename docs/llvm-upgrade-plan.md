@@ -48,6 +48,10 @@ enabled. The fix is now integrated into the normal build and the focused
 runtime checks pass there too, with LLVM unchanged. See the
 [integration validation](../reports/pin-update/2026-09-06-pahole-integration.md).
 
+The subsequent [upstream pahole comparison](../reports/pahole-update/2026-09-07.md)
+confirms current master fixes this case without our patch. Normal-build
+validation of that pinned upstream revision precedes the LLVM update.
+
 ## Why local and CI differ
 
 `build.sh` retains a usable installed compiler unless asked to rebuild
@@ -61,6 +65,23 @@ committed. Its API-error fallback can query the newest release even when
 a tag was requested. A reproducible pin needs to fail clearly instead
 of silently selecting another version, and must detect a mismatched
 existing installation.
+
+## September 7 archive probe
+
+The current stable release remains 23.1.0. The downloaded official archive
+matches its published SHA-256:
+`18da30f77f475688a18f7704d23f9f155ae007ed9922dbed6850a9419d9fec8c`.
+A separate staging extraction runs clang, llc, llvm-config, llvm-strip and
+llvm-objcopy successfully. Its bundled `ld.lld` cannot load
+`libicui18n.so.70` on this host; the validated host-linker fallback covers
+both the `LD` and `LLD` selftest build paths. Both affected host helpers
+also build successfully with the staged LLVM 23 and `/usr/bin/ld`. The active build compiler
+remains LLVM 22.1.8 while pahole validation runs.
+
+Clang 23.1.0 defines `__BPF_FEATURE_STACK_ARGUMENT` for `-target bpf -mcpu=v4`;
+22.1.8 does not. This confirms the new compiler can compile the real test
+bodies behind those four existing guards. Runtime results remain to be
+measured after the compiler update.
 
 ## Proposed next task
 

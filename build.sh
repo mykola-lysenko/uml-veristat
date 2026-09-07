@@ -60,7 +60,6 @@ LLVM_REPO="${LLVM_REPO:-https://github.com/llvm/llvm-project.git}"
 LLVM_BRANCH="${LLVM_BRANCH:-main}"                   # LLVM 23 development tip
 
 PAHOLE_REPO="${PAHOLE_REPO:-https://github.com/acmel/dwarves.git}"
-PAHOLE_TAG="${PAHOLE_TAG:-v1.31}"
 
 KERNEL_REPO="${KERNEL_REPO:-https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git}"
 KERNEL_BRANCH="${KERNEL_BRANCH:-master}"
@@ -70,12 +69,15 @@ KERNEL_BRANCH="${KERNEL_BRANCH:-master}"
 # ------------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${UML_VERISTAT_WORKDIR:-${SCRIPT_DIR}/.build}"
+PAHOLE_TAG="${PAHOLE_TAG:-$(cat "${SCRIPT_DIR}/pahole-commit")}"
+# Keep previous source and build trees available when the pin changes.
+PAHOLE_SOURCE_ID=$(printf '%s\n%s\n' "${PAHOLE_REPO}" "${PAHOLE_TAG}" | sha256sum | cut -c1-16)
 
 LLVM_SRC="${WORKDIR}/llvm-project"
 LLVM_BUILD="${WORKDIR}/llvm-build"
 LLVM_INSTALL="${LLVM_INSTALL:-${WORKDIR}/llvm-install}"
-PAHOLE_SRC="${WORKDIR}/dwarves"
-PAHOLE_BUILD="${WORKDIR}/pahole-build"
+PAHOLE_SRC="${WORKDIR}/dwarves-${PAHOLE_SOURCE_ID}"
+PAHOLE_BUILD="${WORKDIR}/pahole-build-${PAHOLE_SOURCE_ID}"
 PAHOLE_INSTALL="${WORKDIR}/pahole-install"
 LINUX_DIR="${WORKDIR}/bpf-next"
 SELFTESTS_DIR="${LINUX_DIR}/tools/testing/selftests/bpf"
@@ -1211,6 +1213,7 @@ if [ "${REBUILD_PAHOLE}" = "1" ] || [ ! -f "${KERNEL_PAHOLE_STAMP}" ] || \
     rm -f "${LINUX_DIR}/vmlinux.unstripped"
     REBUILD_KERNEL=1
     REBUILD_TESTMOD=1
+    REBUILD_SELFTESTS=1
 fi
 
 # Check if UML binary already exists, unless rebuilding or updating

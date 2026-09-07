@@ -25,10 +25,9 @@ The stack is split by purpose:
 organizational; the full package and CI path still uses every folder unless
 `--clean` or `--skip-patches` is requested.
 
-[`pahole/`](pahole/) is a separate toolchain patch set, applied when building
-pahole in every mode. It is not included in the kernel stack or kernel
-patch counts. Its wide-scalar fix preserves function BTF for 128-bit tracing
-arguments.
+The [former pahole patch](pahole/) is retired: the upstream revision in
+`pahole-commit` already handles wide scalar argument BTF. Pahole builds
+without local patches; the kernel patch inventory is unchanged.
 
 ## Patches
 
