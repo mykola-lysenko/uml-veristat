@@ -1327,6 +1327,9 @@ fi
 [ -x "${BPFTOOL_BIN}" ] || { echo "bpftool build failed"; exit 1; }
 info "bpftool: ${BPFTOOL_BIN}"
 
+# The selftests host helper rules use LLD for clang -fuse-ld independently
+# of LD. Pass the validated linker to both so the fallback also covers them.
+
 # --- 7b: build everything in the selftests directory ---
 # Running plain 'make' (no explicit target) builds all test binaries,
 # all BPF programs under progs/ (.bpf.o files), and all skeletons.
@@ -1360,6 +1363,7 @@ if [ ! -x "${VERISTAT_BIN}" ] || [ ! -x "${TEST_PROGS_BIN}" ] || \
         CLANG="${CLANG}" \
         LLC="${LLC}" \
         LD="${BUILD_LD}" \
+        LLD="${BUILD_LD}" \
         BPFTOOL="${BPFTOOL_BIN}" \
         VMLINUX_BTF="${UML_BINARY}" \
         ARCH=x86_64 \

@@ -10,6 +10,7 @@
 #   UML_KERNEL       — path to the UML kernel binary
 #   TEST_PROGS       — path to the test_progs binary
 #   SELFTESTS_OUTPUT — directory containing test_progs and selftest data files
+#   UML_VERISTAT_WORKDIR — build directory (same override as build.sh)
 #   UML_MODULES      — space-separated bpf_test*.ko paths; set to "" to disable
 #   UML_MEM          — UML guest memory (default: 1792M)
 #   UML_VERBOSE      — set to 1 to show UML boot messages
@@ -25,7 +26,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/.build"
+BUILD_DIR="${UML_VERISTAT_WORKDIR:-${SCRIPT_DIR}/.build}"
 
 print_usage() {
     cat >&2 <<'EOF'
